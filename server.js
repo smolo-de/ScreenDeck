@@ -86,7 +86,9 @@ function save() {
 }
 function saveNow() {
   clearTimeout(saveTimer);
-  const { nextAt, playlist, ...persisted } = state; // playlist steckt schon in playlists
+  const { nextAt, playlist, ...rest } = state; // playlist steckt schon in playlists
+  // Masken-Entwurf und -Auswahl sind nur fürs Bearbeiten da
+  const persisted = { ...rest, screens: rest.screens.map(({ maskDraft, maskSel, ...sc }) => sc) };
   const tmp = STATE_FILE + '.tmp';
   fs.writeFileSync(tmp, JSON.stringify(persisted, null, 2));
   fs.renameSync(tmp, STATE_FILE);
@@ -408,7 +410,94 @@ function remoteSound(ctrl, msg) {
   pushRemoteSound(ctrl);
 }
 
+// ---------------------------------------------------------------------------
+// Projektions-Maske (z. B. Beamer auf eine Hauswand): Vielecke, in denen der Screen nichts zeigt (schwarz).
+// Punkte bezogen auf die Bildschirmfläche des Screens (0–1), gespeichert pro Screen. Bearbeitet wird an der
+// Fernbedienung; währenddessen zeigt der Screen selbst ein Drahtgitter mit den Umrissen.
+// ---------------------------------------------------------------------------
+
+const MASK_LIMIT = 50; // Bereiche je Screen
+/** Masken aus einer Nachricht prüfen: höchstens 50 Vielecke mit 3–100 Punkten, Werte gerundet */
+function cleanMasks(list) {
+  if (!Array.isArray(list)) return [];
+  return list
+    .slice(0, MASK_LIMIT)
+    .map((m) => {
+      const num = (n) => Math.round(Math.min(1.5, Math.max(-0.5, Number(n) || 0)) * 10000) / 10000;
+      const out = { id: String(m?.id ?? newId()).slice(0, 20), pts: (Array.isArray(m?.pts) ? m.pts.slice(0, 200) : []).map(num) };
+      // Form (zum Bearbeiten): Ellipse behält ihren Rahmen, Rechteck/Dreieck sind danach freie Eckpunkte
+      if (['poly', 'rect', 'tri', 'ellipse'].includes(m?.shape)) out.shape = m.shape;
+      if (out.shape === 'ellipse' && Array.isArray(m.box) && m.box.length === 4) out.box = m.box.map(num);
+      return out;
+    })
+    .filter((m) => m.pts.length >= 6 && m.pts.length % 2 === 0);
+}
+/** Wird die Maske dieses Screens gerade an einer Fernbedienung bearbeitet? */
+const maskEditing = (screen) => state.screens.some((c) => c.remote?.role === 'controller' && c.remote.maskEdit === screen.id);
+/** Für den Screen: Masken; beim Bearbeiten zusätzlich Entwurf (Bereich im Entstehen) und gewählter Punkt fürs Drahtgitter */
+function maskMsg(screen) {
+  const edit = maskEditing(screen);
+  // invert: Inhalt nur innerhalb der Bereiche zeigen (statt dort auszuschneiden)
+  // feather: weiche Kanten 0–50 (Anteil der kürzeren Bildschirmseite in Promille)
+  return { masks: screen.masks ?? [], off: !!screen.maskOff, invert: !!screen.maskInvert, feather: screen.maskFeather ?? 0, edit, ...(edit && { draft: screen.maskDraft ?? null, sel: screen.maskSel ?? null }) };
+}
+function pushMasks(screen) {
+  for (const ws of screenSockets.get(screen.id) ?? []) send(ws, { type: 'masks', ...maskMsg(screen) });
+}
+/** Stand für die Fernbedienung: gewählter Screen, dessen Masken, Seitenverhältnis und die wählbaren Screens */
+function maskStateMsg(ctrl) {
+  const t = screenById(ctrl.remote?.maskEdit) ?? null;
+  return {
+    type: 'maskState',
+    screenId: t?.id ?? null,
+    screens: state.screens.filter((x) => x !== ctrl).map((x) => ({ id: x.id, name: x.name, online: isOnline(x.id), count: x.masks?.length ?? 0 })).sort((a, b) => b.online - a.online),
+    masks: t?.masks ?? [],
+    off: !!t?.maskOff,
+    invert: !!t?.maskInvert,
+    feather: t?.maskFeather ?? 0,
+    aspect: t?.viewport ? t.viewport.w / t.viewport.h : 16 / 9,
+  };
+}
+function sendMaskState(ctrl) {
+  for (const ws of screenSockets.get(ctrl.id) ?? []) send(ws, maskStateMsg(ctrl));
+}
+/** Bearbeiten beenden: der Screen blendet das Drahtgitter aus */
+function endMaskEdit(ctrl) {
+  const t = screenById(ctrl.remote?.maskEdit);
+  if (ctrl.remote) ctrl.remote.maskEdit = null;
+  if (t) pushMasks(t);
+}
+function handleMaskMessage(ctrl, msg) {
+  if (ctrl.remote?.role !== 'controller') return;
+  if (msg.op === 'edit') {
+    // Screen zum Bearbeiten wählen (null = keiner, ohne Angabe: bisheriger bzw. erster gesteuerter);
+    // der bisherige blendet sein Gitter aus
+    const t = msg.screenId === undefined ? screenById(ctrl.remote.maskEdit) ?? remoteTargets(ctrl)[0] ?? null : msg.screenId ? screenById(msg.screenId) : null;
+    if (t === ctrl) return;
+    const before = screenById(ctrl.remote.maskEdit);
+    ctrl.remote.maskEdit = t?.id ?? null;
+    if (before && before !== t) pushMasks(before);
+    if (t) pushMasks(t);
+    return sendMaskState(ctrl);
+  }
+  const t = screenById(ctrl.remote.maskEdit);
+  if (!t) return;
+  if (msg.op === 'set') {
+    t.masks = cleanMasks(msg.masks);
+    // nur fürs Drahtgitter, nicht gespeichert: Bereich im Entstehen und gewählter Punkt
+    t.maskDraft = Array.isArray(msg.draft) ? msg.draft.slice(0, 200).map((n) => Math.round(Math.min(1.5, Math.max(-0.5, Number(n) || 0)) * 10000) / 10000) : null;
+    t.maskSel = msg.sel && Number.isInteger(msg.sel.p) ? { p: msg.sel.p, v: Number.isInteger(msg.sel.v) ? msg.sel.v : -1, e: Number.isInteger(msg.sel.e) ? msg.sel.e : -1 } : null;
+  }
+  else if (msg.op === 'enable') t.maskOff = !msg.on;
+  else if (msg.op === 'invert') t.maskInvert = !!msg.on;
+  else if (msg.op === 'feather') t.maskFeather = Math.max(0, Math.min(50, Math.round(Number(msg.value) || 0)));
+  else return;
+  pushMasks(t);
+  changed();
+}
+
 function stopRemote(ctrl) {
+  endMaskEdit(ctrl);
   const group = remoteGroup(ctrl);
   for (const g of group) {
     delete g.remote;
@@ -528,6 +617,7 @@ function handleRemoteMessage(screen, msg, ws) {
     if (screen.remote?.role !== 'controller') return;
     return send(ws, remotePlaylistMsg());
   }
+  if (msg.type === 'mask') return handleMaskMessage(screen, msg);
   if (msg.type === 'remoteRotate') {
     // Drehung in Vierteldrehungen (im Uhrzeigersinn) an die gesteuerten Screens weiterreichen
     if (screen.remote?.role !== 'controller') return;
@@ -726,6 +816,7 @@ function pushToScreen(screen, { force = false, retry = false } = {}) {
     touchZoom: state.settings.touchZoom !== false,
     remote: remoteMsg(screen),
     remoteAllowed: !!screen.remoteAllowed,
+    mask: maskMsg(screen),
     preload: preloadFor(screen),
     force,
   };
@@ -2363,6 +2454,14 @@ app.patch('/api/screens/:id', (req, res) => {
     screen.music = req.body.music;
     pushMusic([screen]);
   }
+  if (typeof req.body?.maskOff === 'boolean' || typeof req.body?.maskInvert === 'boolean' || req.body?.maskFeather !== undefined || Array.isArray(req.body?.masks)) {
+    if (typeof req.body.maskOff === 'boolean') screen.maskOff = req.body.maskOff;
+    if (typeof req.body.maskInvert === 'boolean') screen.maskInvert = req.body.maskInvert;
+    if (req.body.maskFeather !== undefined) screen.maskFeather = Math.max(0, Math.min(50, Math.round(Number(req.body.maskFeather) || 0)));
+    if (Array.isArray(req.body.masks)) screen.masks = cleanMasks(req.body.masks);
+    pushMasks(screen);
+    for (const c of state.screens) if (c.remote?.maskEdit === screen.id) sendMaskState(c);
+  }
   if (typeof req.body?.remoteAllowed === 'boolean') {
     // Ohne Freigabe zeigt der Screen keinen Fernsteuerungs-Knopf; eine laufende Steuerung endet
     screen.remoteAllowed = req.body.remoteAllowed;
@@ -2692,7 +2791,15 @@ wss.on('connection', (ws, req) => {
       else if (msg.type === 'progress') relayProgress(s, msg);
       else if (msg.type === 'ended') onItemEnded(s, msg);
       else if (msg.type === 'musicStatus' || msg.type === 'musicEnded') handleMusicMessage(s, msg);
-      else if (msg.type === 'remote' || msg.type === 'remoteList' || msg.type === 'remoteZoom' || msg.type === 'remoteDraw' || msg.type === 'remoteRotate' || msg.type === 'remoteSound' || msg.type === 'remotePlaylist') handleRemoteMessage(s, msg, ws);
+      else if (msg.type === 'remote' || msg.type === 'remoteList' || msg.type === 'remoteZoom' || msg.type === 'remoteDraw' || msg.type === 'remoteRotate' || msg.type === 'remoteSound' || msg.type === 'remotePlaylist' || msg.type === 'mask') handleRemoteMessage(s, msg, ws);
+      else if (msg.type === 'viewport') {
+        // Bildschirmgröße des Screens: Seitenverhältnis für den Masken-Editor
+        const w = Math.round(Number(msg.w)), h = Math.round(Number(msg.h));
+        if (w > 0 && h > 0 && w < 20000 && h < 20000 && (s.viewport?.w !== w || s.viewport?.h !== h)) {
+          s.viewport = { w, h };
+          for (const c of state.screens) if (c.remote?.maskEdit === s.id) sendMaskState(c);
+        }
+      }
       else if (msg.type === 'audio') {
         // Menü am Screen: Video-Ton an/aus und Lautstärke (wie in der Verwaltung)
         if (typeof msg.enabled === 'boolean') s.audio = msg.enabled;
@@ -2726,6 +2833,7 @@ wss.on('connection', (ws, req) => {
           s.report = null;
           s.musicReport = null;
           if (s.remote?.role === 'controller') {
+            endMaskEdit(s);
             setTimeout(() => {
               const c = screenById(id);
               if (c?.remote?.role === 'controller' && !isOnline(id)) {

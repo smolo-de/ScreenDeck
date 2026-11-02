@@ -805,6 +805,13 @@ function render() {
                 <option value="" ${s.remoteAllowed ? '' : 'selected'}>gesperrt</option>
                 <option value="1" ${s.remoteAllowed ? 'selected' : ''}>erlaubt</option>
               </select></label>
+              ${s.masks?.length ? `<div class="sc-field" title="Projektions-Maske: in diesen Bereichen zeigt der Screen nichts. Bearbeiten an der Fernbedienung (⬚ Maske).">
+                <span>Maske</span>
+                <div class="row mask-row"><span>${s.maskOff ? `Bereiche: ${s.masks.length} · aus` : s.maskInvert ? `Bereiche: ${s.masks.length} · umgekehrt` : `Bereiche: ${s.masks.length}`}</span>${s.maskFeather ? `<span class="count" title="Weiche Kanten">◌ ${s.maskFeather}</span>` : ''}
+                  <button class="small" data-action="mask-invert" title="Umkehren: Inhalt nur innerhalb der Bereiche zeigen">${s.maskInvert ? 'Normal' : 'Umkehren'}</button>
+                  <button class="small" data-action="mask-toggle">${s.maskOff ? 'Einschalten' : 'Ausschalten'}</button>
+                  <button class="small danger" data-action="mask-clear">Entfernen</button></div>
+              </div>` : ''}
             </div>
             ${standbyEdit(s)}
           </div>
@@ -1516,6 +1523,19 @@ $('#screens').addEventListener('click', (e) => {
     const screen = state.screens.find((s) => s.id === id);
     const zero = (screen.musicVolume ?? 100) === 0;
     api('PATCH', `/api/screens/${id}`, screen.music && screen.musicMuted ? { musicMuted: false, ...(zero && { musicVolume: 50 }) } : { music: !screen.music });
+  }
+  if (btn.dataset.action === 'mask-toggle') {
+    const screen = state.screens.find((s) => s.id === id);
+    api('PATCH', `/api/screens/${id}`, { maskOff: !screen.maskOff });
+  }
+  if (btn.dataset.action === 'mask-invert') {
+    const screen = state.screens.find((s) => s.id === id);
+    api('PATCH', `/api/screens/${id}`, { maskInvert: !screen.maskInvert });
+  }
+  if (btn.dataset.action === 'mask-clear') {
+    ask('Maske dieses Screens entfernen?\n\nAlle Bereiche werden gelöscht, der Screen zeigt wieder die ganze Fläche.', { ok: 'Entfernen', danger: true }).then(
+      (yes) => yes && api('PATCH', `/api/screens/${id}`, { masks: [] })
+    );
   }
   if (btn.dataset.action === 'delete-screen')
     ask('Diesen Screen aus der Liste entfernen?', { ok: 'Entfernen', danger: true }).then((yes) => yes && api('DELETE', `/api/screens/${id}`));

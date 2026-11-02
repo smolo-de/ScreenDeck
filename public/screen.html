@@ -205,6 +205,50 @@
     .lb-item::before { content: ''; display: block; padding-top: 62.5%; }
     .lb-item img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
     .lb-empty { padding: 18px 8px; text-align: center; color: #9ca3af; font-size: 14px; }
+    /* Projektions-Maske am Screen */
+    #maskLayer { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 6; pointer-events: none; }
+    /* Masken-Editor an der Fernbedienung */
+    #maskBar { position: fixed; left: 50%; transform: translateX(-50%); z-index: 15; display: grid; gap: 8px; padding: 10px 12px 12px;
+      width: min(680px, calc(100vw - 24px)); box-sizing: border-box; border-radius: 16px; color: #f3f4f6; font-size: 14px;
+      background: rgba(22, 24, 30, .94); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
+      border: 1px solid rgba(255,255,255,.14); box-shadow: 0 8px 24px rgba(0,0,0,.4);
+      bottom: calc(max(12px, env(safe-area-inset-bottom)) + var(--rb-h, 68px) + 10px); }
+    #maskBar[hidden] { display: none; }
+    .mk-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
+    .mk-label { color: #9ca3af; font-size: 13px; }
+    .mk-screens { font-size: 13px; }
+    .mk-stage { position: relative; margin: 0 auto; border-radius: 8px; overflow: hidden; background: #0b0d12 center / contain no-repeat;
+      outline: 1px solid rgba(255,255,255,.18); touch-action: none; }
+    .mk-svg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+    .mk-tools button, .mk-foot button { height: 38px; min-width: 38px; padding: 0 10px; border-radius: 10px; font: inherit; font-weight: 600; cursor: pointer;
+      color: #fff; background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.16); touch-action: manipulation; }
+    .mk-tools button.primary { background: #2563eb; border-color: #3b82f6; }
+    .mk-tools button:disabled { opacity: .35; }
+    .mk-tools button[hidden] { display: none; }
+    .mk-sep { flex: 1; }
+    .mk-nudge { font-size: 16px; padding: 0 !important; width: 38px; }
+    .mk-foot { justify-content: space-between; }
+    .mk-on { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+    .mk-softrow { flex-wrap: nowrap; gap: 10px; }
+    .mk-softrow input { flex: 1; min-width: 0; accent-color: #3b82f6; }
+    .mk-softval { width: 2.2em; text-align: right; font-variant-numeric: tabular-nums; color: #e5e7eb; }
+    .mk-on input { width: 18px; height: 18px; accent-color: #3b82f6; }
+    /* einzeilig, damit die Zeichenfläche beim Zeichnen nicht springt */
+    .mk-hint { flex: 1; min-width: 0; color: #9ca3af; font-size: 12.5px; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .mk-tools { flex-wrap: nowrap; gap: 5px; }
+    /* schmale Smartphones: Hinweis in eigener Zeile unter den Schaltern (immer einzeilig) */
+    @media (max-width: 440px) { .mk-foot { flex-wrap: wrap; } .mk-foot .mk-hint { order: 3; flex-basis: 100%; text-align: left; } }
+    .mk-tools button { white-space: nowrap; flex: none; }
+    .mk-arrows { display: flex; gap: 5px; margin-left: auto; }
+    .mk-shapes { display: flex; gap: 3px; padding: 2px; border-radius: 12px; background: rgba(255,255,255,.06); }
+    .mk-shapes button { width: 38px; padding: 0 !important; font-size: 18px; line-height: 1; }
+    .mk-shapes button.on { background: #2563eb; border-color: #93c5fd; }
+    .mk-shapes[hidden] { display: none; }
+    .mk-tools .mk-scale { font-size: 18px; }
+    .mk-tools .mk-scale.on { background: #7c3aed; border-color: #c4b5fd; }
+    #maskBar.scaling .mk-nudge:not(:disabled) { border-color: #c4b5fd; }
+    /* schmale Smartphones: Pfeile in eine eigene Zeile (fester Aufbau, springt beim Zeichnen nicht) */
+    @media (max-width: 440px) { .mk-tools { flex-wrap: wrap; } .mk-arrows { width: 100%; justify-content: space-between; } .mk-arrows .mk-nudge { flex: 1; } }
     /* Löschmodus */
     .lb-head .lb-del { padding: 0 10px; }
     #listBar.del-mode .lb-del { background: #dc2626; border-color: #f87171; }
@@ -308,6 +352,8 @@
 <body>
   <div id="stage"><div class="layer"></div><div class="layer"></div></div>
   <div id="cover"></div>
+  <!-- Projektions-Maske: schwarze Bereiche über allem Inhalt; beim Bearbeiten mit Drahtgitter -->
+  <svg id="maskLayer" aria-hidden="true"></svg>
   <div id="ident"></div>
   <div id="status" title="Keine Verbindung zum Server"></div>
   <div id="hint">Tippen für Menü</div>
@@ -372,6 +418,40 @@
     <!-- Scrollen im äußeren Container: im Raster selbst würde die Höhenbegrenzung die Zeilen zusammendrücken -->
     <div class="lb-scroll"><div class="lb-grid"></div></div>
   </div>
+  <!-- Masken-Editor (Fernbedienung): Bereiche zeichnen, Ecken ziehen, fein verschieben -->
+  <div id="maskBar" hidden>
+    <div class="mk-row"><span class="mk-label">Maske für</span><div class="m-chips mk-screens"></div></div>
+    <div class="mk-stage"><svg class="mk-svg"></svg></div>
+    <div class="mk-row mk-tools">
+      <span class="mk-shapes">
+        <button data-k="add" data-shape="poly" title="Freies Vieleck: Ecken antippen">⬠</button>
+        <button data-k="add" data-shape="rect" title="Rechteck: aufziehen oder antippen – danach jede Ecke einzeln verschiebbar">▭</button>
+        <button data-k="add" data-shape="ellipse" title="Kreis / Ellipse: aufziehen oder antippen (Kreis)">◯</button>
+        <button data-k="add" data-shape="tri" title="Dreieck: aufziehen oder antippen – danach jede Ecke einzeln verschiebbar">△</button>
+      </span>
+      <button data-k="close" class="primary" hidden>✓ Schließen</button>
+      <button data-k="undo" title="Beim Zeichnen: letzten Punkt zurücknehmen – sonst gewählten Punkt löschen">↶</button>
+      <button data-k="del" title="Gewählten Bereich löschen">🗑</button>
+      <button data-k="scale" class="mk-scale" title="Skalieren: ziehen = größer/kleiner um die Mitte, ← → Breite, ↑ ↓ Höhe (zwei Finger gehen immer)">⤢</button>
+      <span class="mk-arrows">
+        <button data-k="l" class="mk-nudge" title="Fein nach links">←</button>
+        <button data-k="u" class="mk-nudge" title="Fein nach oben">↑</button>
+        <button data-k="d" class="mk-nudge" title="Fein nach unten">↓</button>
+        <button data-k="r" class="mk-nudge" title="Fein nach rechts">→</button>
+      </span>
+    </div>
+    <div class="mk-row mk-softrow" title="Weiche Kanten: die Ränder der Bereiche laufen sanft aus (gilt für alle Bereiche dieses Screens)">
+      <span class="mk-label">Weiche Kanten</span>
+      <input type="range" min="0" max="50" step="1" value="0" data-k="soft" aria-label="Weiche Kanten">
+      <span class="mk-softval">0</span>
+    </div>
+    <div class="mk-row mk-foot">
+      <label class="mk-on"><input type="checkbox" data-k="on" checked> Maske aktiv</label>
+      <label class="mk-on" title="Umkehren: Inhalt nur innerhalb der Bereiche zeigen, außen nichts"><input type="checkbox" data-k="inv"> Umkehren</label>
+      <span class="mk-hint"></span>
+      <button data-k="clear">Alle löschen</button>
+    </div>
+  </div>
   <!-- Rückfrage beim Löschen (eigenes Fenster statt Browser-Popup) -->
   <dialog id="lbAsk">
     <p class="ask-q"></p>
@@ -392,6 +472,7 @@
     <button data-r="unzoom" title="Zoom zurücksetzen" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M8 11h6M21 21l-4.3-4.3"/></svg></button>
     <button data-r="rotate" title="Bild drehen (90° im Uhrzeigersinn)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36L21 8"/><path d="M21 3v5h-5"/></svg></button>
     <button data-r="pen" title="Stift: auf dem Bild zeichnen"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg></button>
+    <button data-r="mask" title="Maske: Bereiche eines Screens ausblenden (z. B. Fenster bei Beamer-Projektion)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 21V9l9-6 9 6v12z"/><rect x="7" y="12" width="4" height="4" fill="currentColor"/><rect x="13" y="12" width="4" height="4" fill="currentColor"/></svg></button>
     <button data-r="sound" title="Ton der gesteuerten Screens"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5 6 9H2v6h4l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M19 5a10 10 0 0 1 0 14"/></svg></button>
   </div>
   <div id="menu" hidden>
@@ -1047,6 +1128,7 @@
       ws.onopen = () => {
         statusDot.classList.remove('on');
         report({}, true); // aktuellen Stand nach (Wieder-)Verbindung melden
+        reportViewport(); // Seitenverhältnis für den Masken-Editor
         if (!menu.hidden) updateMenu();
       };
       ws.onmessage = (e) => {
@@ -1065,6 +1147,7 @@
           setTouchZoom(msg.touchZoom);
           remoteAllowed = !!msg.remoteAllowed;
           setRemote(msg.remote);
+          setMasks(msg.mask);
           quality = msg.quality ?? quality;
           if (!menu.hidden) updateMenu();
           preload(msg.preload);
@@ -1087,6 +1170,10 @@
           applyRemoteDraw(msg);
         } else if (msg.type === 'rotate') {
           if (remote?.role === 'target' && msg.itemId === currentItem?.id) setRotation(msg.r);
+        } else if (msg.type === 'masks') {
+          setMasks(msg);
+        } else if (msg.type === 'maskState') {
+          if (!maskBar.hidden) applyMaskState(msg);
         } else if (msg.type === 'remotePlaylist') {
           remotePlaylist = msg;
           renderList();
@@ -1411,7 +1498,7 @@
     }
 
     document.addEventListener('pointerdown', (e) => {
-      if (penOn || e.pointerType === 'mouse' || e.target.closest('#menu, #remoteBar, #penBar, #soundBar, #listBar, #lbAsk') || !(zoomable() || remote?.role === 'controller')) return;
+      if (penOn || e.pointerType === 'mouse' || e.target.closest('#menu, #remoteBar, #penBar, #soundBar, #listBar, #lbAsk, #maskBar') || !(zoomable() || remote?.role === 'controller')) return;
       if (!touches.size) gestureMoved = false;
       touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
       startGesture();
@@ -1486,6 +1573,7 @@
         setPen(false);
         setSoundBar(false);
         setListBar(false);
+        if (!maskBar.hidden) setMaskBar(false);
       }
       if (!remote && strokes.length) clearInk();
       if (!remote && rot) setRotation(0);
@@ -1668,7 +1756,7 @@
     }
 
     document.addEventListener('pointerdown', (e) => {
-      if (!penOn || drawing || e.target.closest('#menu, #remoteBar, #penBar, #soundBar, #listBar, #lbAsk')) return;
+      if (!penOn || drawing || e.target.closest('#menu, #remoteBar, #penBar, #soundBar, #listBar, #lbAsk, #maskBar')) return;
       e.preventDefault();
       const p = toImage(e.clientX, e.clientY);
       drawing = { id: Math.random().toString(36).slice(2, 10), color: pen.color, size: pen.size, pts: [...p, ...p], pointer: e.pointerId, sent: 0 };
@@ -2070,9 +2158,17 @@
     const lbAsk = document.getElementById('lbAsk');
     lbAsk.addEventListener('click', (e) => e.stopPropagation()); // kein Menü
     lbAsk.addEventListener('pointerdown', (e) => e.stopPropagation());
-    function askDelete(count) {
+    const askDelete = (count) =>
+      askScreen(
+        count === 1 ? t('1 Eintrag aus der Playlist löschen?') : t('{0} Einträge aus der Playlist löschen?', count),
+        t('Hochgeladene Dateien werden mitgelöscht, sofern keine andere Playlist sie verwendet. Dateien aus Medienordnern bleiben erhalten.')
+      );
+    /** Rückfrage im eigenen Fenster (Frage, Erklärung) – „Abbrechen“ ist vorausgewählt */
+    function askScreen(question, note = '') {
       return new Promise((resolve) => {
-        lbAsk.querySelector('.ask-q').textContent = count === 1 ? t('1 Eintrag aus der Playlist löschen?') : t('{0} Einträge aus der Playlist löschen?', count);
+        lbAsk.querySelector('.ask-q').textContent = question;
+        lbAsk.querySelector('.ask-note').textContent = note;
+        lbAsk.querySelector('.ask-note').hidden = !note;
         const done = (yes) => {
           lbAsk.onclick = lbAsk.oncancel = null;
           lbAsk.close();
@@ -2144,9 +2240,672 @@
       xhr.send(form);
     });
 
+    // -----------------------------------------------------------------------
+    // Projektions-Maske (z. B. Beamer auf eine Hauswand): Bereiche, in denen dieser Screen nichts zeigt.
+    // Punkte bezogen auf die Bildschirmfläche (0–1). Beim Bearbeiten an der Fernbedienung zeigt der Screen
+    // zusätzlich ein Drahtgitter, Umrisse und Eckpunkte – so lassen sie sich direkt an der Wand ausrichten.
+    // -----------------------------------------------------------------------
+
+    const maskLayer = document.getElementById('maskLayer');
+    let maskShown = { masks: [], off: false, edit: false, draft: null, sel: null };
+    function setMasks(m) {
+      if (!m) return;
+      maskShown = m;
+      renderMasks();
+    }
+    // Formen: Ellipse wird aus ihrem Rahmen [x1, y1, x2, y2] berechnet; Griffe = Rahmenecken, sonst die Eckpunkte
+    const r4 = (n) => Math.round(n * 10000) / 10000;
+    function ellipsePts([x1, y1, x2, y2], steps = 48) {
+      const cx = (x1 + x2) / 2, cy = (y1 + y2) / 2, rx = Math.abs(x2 - x1) / 2, ry = Math.abs(y2 - y1) / 2;
+      const pts = [];
+      for (let i = 0; i < steps; i++) {
+        const a = (2 * Math.PI * i) / steps;
+        pts.push(r4(cx + rx * Math.cos(a)), r4(cy + ry * Math.sin(a)));
+      }
+      return pts;
+    }
+    function handlesOf(m) {
+      if (m.shape === 'ellipse' && m.box) {
+        const [x1, y1, x2, y2] = m.box;
+        return [[x1, y1], [x2, y1], [x2, y2], [x1, y2]];
+      }
+      const out = [];
+      for (let i = 0; i + 1 < m.pts.length; i += 2) out.push([m.pts[i], m.pts[i + 1]]);
+      return out;
+    }
+    /**
+     * Kantengriffe (Mitte jeder Seite): beim Rechteck (4 Ecken) und bei der Ellipse (Seiten ihres Rahmens).
+     * Kante e verbindet Ecke e und e+1 – oben, rechts, unten, links.
+     */
+    function edgesOf(m) {
+      if (m.shape === 'ellipse' && m.box) {
+        const [x1, y1, x2, y2] = m.box;
+        return [[(x1 + x2) / 2, y1], [x2, (y1 + y2) / 2], [(x1 + x2) / 2, y2], [x1, (y1 + y2) / 2]];
+      }
+      if (m.shape !== 'rect' || m.pts.length !== 8) return [];
+      const p = m.pts;
+      return [0, 1, 2, 3].map((e) => {
+        const a = e * 2, b = ((e + 1) % 4) * 2;
+        return [(p[a] + p[b]) / 2, (p[a + 1] + p[b + 1]) / 2];
+      });
+    }
+    const ptsPx = (pts, W, H) => {
+      let out = '';
+      for (let i = 0; i + 1 < pts.length; i += 2) out += `${(pts[i] * W).toFixed(1)},${(pts[i + 1] * H).toFixed(1)} `;
+      return out;
+    };
+    function renderMasks() {
+      const W = innerWidth, H = innerHeight;
+      const { masks = [], off, edit, draft, sel } = maskShown;
+      maskLayer.setAttribute('viewBox', `0 0 ${W} ${H}`);
+      let svg = '';
+      if (edit) {
+        // Drahtgitter: Zehntel kräftiger, Zwanzigstel dünn
+        for (let i = 1; i < 20; i++) {
+          const strong = i % 2 === 0;
+          const a = strong ? 0.35 : 0.15;
+          svg += `<line x1="${(W * i) / 20}" y1="0" x2="${(W * i) / 20}" y2="${H}" stroke="rgba(34,211,238,${a})" stroke-width="1"/>`;
+          svg += `<line x1="0" y1="${(H * i) / 20}" x2="${W}" y2="${(H * i) / 20}" stroke="rgba(34,211,238,${a})" stroke-width="1"/>`;
+        }
+        svg += `<rect x="1" y="1" width="${W - 2}" height="${H - 2}" fill="none" stroke="#22d3ee" stroke-width="2"/>`;
+      }
+      // Bereiche nicht übermalen, sondern aus dem Inhalt ausschneiden (siehe cutMasks) – hier nur die Umrisse fürs Bearbeiten
+      cutMasks(off ? [] : masks, W, H, !!maskShown.invert, maskShown.feather ?? 0);
+      if (edit) {
+        masks.forEach((m, p) => {
+          const chosen = sel?.p === p;
+          // ausgeschaltet: gestrichelt (es wird gerade nichts ausgeschnitten)
+          svg += `<polygon points="${ptsPx(m.pts, W, H)}" fill="none" stroke="${chosen ? '#facc15' : '#22d3ee'}" stroke-width="${chosen ? 3 : 2}"${off ? ' stroke-dasharray="8 6"' : ''}/>`;
+        });
+        masks.forEach((m, p) => {
+          if (m.shape === 'ellipse' && m.box && sel?.p === p) {
+            const [x1, y1, x2, y2] = m.box;
+            svg += `<rect x="${Math.min(x1, x2) * W}" y="${Math.min(y1, y2) * H}" width="${Math.abs(x2 - x1) * W}" height="${Math.abs(y2 - y1) * H}" fill="none" stroke="#facc15" stroke-width="1.5" stroke-dasharray="6 5"/>`;
+          }
+          handlesOf(m).forEach(([x, y], v) => {
+            const on = sel?.p === p && sel.v === v;
+            svg += `<circle cx="${x * W}" cy="${y * H}" r="${on ? 9 : 6}" fill="${on ? '#facc15' : '#22d3ee'}" stroke="#000" stroke-width="1.5"/>`;
+          });
+          if (sel?.p === p)
+            edgesOf(m).forEach(([x, y], e) => {
+              const on = sel.e === e, s = on ? 8 : 5;
+              svg += `<rect x="${x * W - s}" y="${y * H - s}" width="${2 * s}" height="${2 * s}" fill="${on ? '#facc15' : '#fff'}" stroke="#000" stroke-width="1.5"/>`;
+            });
+        });
+        if (draft?.length >= 2) {
+          svg += `<polyline points="${ptsPx(draft, W, H)}" fill="none" stroke="#facc15" stroke-width="3" stroke-dasharray="10 6"/>`;
+          for (let i = 0; i + 1 < draft.length; i += 2) svg += `<circle cx="${draft[i] * W}" cy="${draft[i + 1] * H}" r="${i ? 6 : 9}" fill="#facc15" stroke="#000" stroke-width="1.5"/>`;
+        }
+      }
+      maskLayer.innerHTML = svg;
+    }
+    /**
+     * Ausschneiden: Inhalt und Standbild bekommen eine Maske mit Löchern – dort wird schlicht nichts gezeichnet,
+     * zu sehen ist der Seitenhintergrund (schwarz = Beamer gibt kein Licht ab; mit ?transparent=1 durchsichtig).
+     */
+    const cutTargets = [document.getElementById('stage'), document.getElementById('cover')];
+    let lastCut = '';
+    function cutMasks(masks, W, H, invert = false, feather = 0) {
+      let url = 'none';
+      if (masks.length) {
+        // weiche Kanten: Bereiche in der Maske weichzeichnen (Stärke bezogen auf die kürzere Bildschirmseite)
+        const blur = (feather / 1000) * Math.min(W, H) * 0.6;
+        // SVG-Bild: weiß = sichtbar, Bereiche über eine SVG-Maske ausgespart (auch bei überlappenden Bereichen);
+        // umgekehrt: nur die Bereiche sichtbar
+        const holes = masks.map((m) => `<polygon points="${ptsPx(m.pts, W, H)}" fill="${invert ? '#fff' : '#000'}"/>`).join('');
+        const soft = blur > 0.3 ? `<filter id="b" x="-20%" y="-20%" width="140%" height="140%" filterUnits="userSpaceOnUse"><feGaussianBlur stdDeviation="${blur.toFixed(1)}"/></filter>` : '';
+        const group = `<g${soft ? ' filter="url(#b)"' : ''}>${holes}</g>`;
+        const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}"><defs>${soft}<mask id="m" maskUnits="userSpaceOnUse" x="0" y="0" width="${W}" height="${H}"><rect width="${W}" height="${H}" fill="${invert ? '#000' : '#fff'}"/>${group}</mask></defs><rect width="${W}" height="${H}" fill="#fff" mask="url(#m)"/></svg>`;
+        url = `url("data:image/svg+xml,${encodeURIComponent(svg)}")`;
+      }
+      if (url === lastCut) return;
+      lastCut = url;
+      for (const el of cutTargets) {
+        for (const p of ['maskImage', 'webkitMaskImage']) el.style[p] = url;
+        for (const p of ['maskSize', 'webkitMaskSize']) el.style[p] = '100% 100%';
+        for (const p of ['maskRepeat', 'webkitMaskRepeat']) el.style[p] = 'no-repeat';
+      }
+    }
+    // ?transparent=1: Seitenhintergrund durchsichtig (z. B. als Browser-Quelle in OBS über einem Video)
+    if (params.get('transparent') === '1') {
+      document.documentElement.style.background = 'transparent';
+      document.body.style.background = 'transparent';
+    }
+
+    // Bildschirmgröße an den Server (Seitenverhältnis für den Editor an der Fernbedienung)
+    let viewportTimer = null;
+    const reportViewport = () => send({ type: 'viewport', w: innerWidth, h: innerHeight });
+    addEventListener('resize', () => {
+      renderMasks();
+      clearTimeout(viewportTimer);
+      viewportTimer = setTimeout(reportViewport, 400);
+    });
+
+    // --- Editor an der Fernbedienung ---------------------------------------
+    const maskBar = document.getElementById('maskBar');
+    const mkStage = maskBar.querySelector('.mk-stage');
+    const mkSvg = maskBar.querySelector('.mk-svg');
+    // tool: gewählte Form zum Aufziehen (rect | ellipse | tri), drawing: freies Vieleck im Entstehen
+    // scale: Skalier-Modus (ziehen und Pfeile ändern die Größe statt der Lage)
+    const mk = { screenId: null, masks: [], aspect: 16 / 9, sel: null, drawing: null, drag: null, loaded: false, tool: null, scale: false };
+    const mkFingers = new Map(); // pointerId -> [x, y] (0–1) für den Zwei-Finger-Zoom
+    const HIT = 22; // Fangradius in Bildschirmpixeln (Finger)
+    const STEP = 0.002; // Feinschritt der Pfeile (0,2 % der Breite/Höhe)
+
+    function setMaskBar(on) {
+      maskBar.hidden = !(on && remote?.role === 'controller');
+      remoteBar.querySelector('[data-r=mask]').classList.toggle('on', !maskBar.hidden);
+      if (maskBar.hidden) {
+        if (mk.screenId) send({ type: 'mask', op: 'edit', screenId: null }); // Drahtgitter am Screen aus
+        mk.screenId = null;
+        mk.loaded = false;
+        return;
+      }
+      setPen(false);
+      setSoundBar(false);
+      setListBar(false);
+      send({ type: 'mask', op: 'edit' }); // bisheriger bzw. erster gesteuerter Screen
+    }
+
+    function applyMaskState(m) {
+      // anderer Screen (oder erstes Laden): dessen Masken übernehmen, sonst die eigene Bearbeitung behalten
+      if (m.screenId !== mk.screenId || !mk.loaded) {
+        mk.masks = (m.masks ?? []).map((x) => ({ id: x.id, pts: [...x.pts], ...(x.shape && { shape: x.shape }), ...(x.box && { box: [...x.box] }) }));
+        mk.tool = null;
+        mk.sel = null;
+        mk.drawing = null;
+        mk.loaded = true;
+      }
+      mk.screenId = m.screenId;
+      mk.aspect = m.aspect || 16 / 9;
+      maskBar.querySelector('[data-k=on]').checked = !m.off;
+      maskBar.querySelector('[data-k=inv]').checked = !!m.invert;
+      mk.invert = !!m.invert;
+      if (!mk.softDragging) {
+        mk.feather = m.feather ?? 0;
+        maskBar.querySelector('[data-k=soft]').value = mk.feather;
+        maskBar.querySelector('.mk-softval').textContent = mk.feather;
+      }
+      maskBar.querySelector('.mk-screens').replaceChildren(
+        ...(m.screens ?? []).map((x) => {
+          const b = document.createElement('button');
+          b.className = 'm-chip' + (x.id === m.screenId ? ' on' : '') + (x.online ? '' : ' off');
+          b.dataset.screen = x.id;
+          b.translate = false;
+          b.textContent = (x.id === m.screenId ? '✓ ' : '') + x.name;
+          return b;
+        })
+      );
+      layoutMaskStage();
+      renderMaskEditor();
+    }
+
+    // Zeichenfläche im Seitenverhältnis des Screens, so groß wie möglich (höchstens 42 % der Höhe)
+    function layoutMaskStage() {
+      if (maskBar.hidden) return;
+      const maxW = maskBar.clientWidth - 24;
+      const maxH = innerHeight * 0.42;
+      const w = Math.min(maxW, maxH * mk.aspect);
+      mkStage.style.width = w + 'px';
+      mkStage.style.height = w / mk.aspect + 'px';
+      // aktuelles Bild als Orientierung im Hintergrund
+      const img = currentItem?.type === 'image' ? currentItem.src : null;
+      mkStage.style.backgroundImage = img ? `url("${img}")` : '';
+    }
+    addEventListener('resize', () => !maskBar.hidden && (layoutMaskStage(), renderMaskEditor()));
+
+    function renderMaskEditor() {
+      if (maskBar.hidden) return;
+      const W = 1000, H = 1000 / mk.aspect;
+      const k = W / (mkStage.clientWidth || 1); // Bildschirmpixel → Einheiten
+      mkSvg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+      // Schachbrett = hier wird nichts angezeigt (durchsichtig)
+      let svg = `<defs><pattern id="mkchk" width="${16 * k}" height="${16 * k}" patternUnits="userSpaceOnUse"><rect width="${16 * k}" height="${16 * k}" fill="#d1d5db"/><rect width="${8 * k}" height="${8 * k}" fill="#9ca3af"/><rect x="${8 * k}" y="${8 * k}" width="${8 * k}" height="${8 * k}" fill="#9ca3af"/></pattern></defs>`;
+      for (let i = 1; i < 10; i++) {
+        svg += `<line x1="${(W * i) / 10}" y1="0" x2="${(W * i) / 10}" y2="${H}" stroke="rgba(34,211,238,.25)" stroke-width="${k}"/>`;
+        svg += `<line x1="0" y1="${(H * i) / 10}" x2="${W}" y2="${(H * i) / 10}" stroke="rgba(34,211,238,.25)" stroke-width="${k}"/>`;
+      }
+      const done = mk.masks.filter((m) => m !== mk.drawing);
+      // weiche Kanten auch in der Vorschau (gleiche Stärke wie am Screen, umgerechnet auf die Zeichenfläche)
+      const blurE = ((mk.feather ?? 0) / 1000) * Math.min(W, H) * 0.6;
+      if (blurE > 0.3) svg += `<defs><filter id="mkblur" x="-20%" y="-20%" width="140%" height="140%" filterUnits="userSpaceOnUse"><feGaussianBlur stdDeviation="${blurE.toFixed(2)}"/></filter></defs>`;
+      const fblur = blurE > 0.3 ? ' filter="url(#mkblur)"' : '';
+      if (mk.invert && done.length) {
+        // umgekehrt: außerhalb der Bereiche wird nichts gezeigt (Schachbrett), innen das Bild
+        svg += `<defs><mask id="mkinv" maskUnits="userSpaceOnUse" x="0" y="0" width="${W}" height="${H}"><rect width="${W}" height="${H}" fill="#fff"/><g${fblur}>${done.map((m) => `<polygon points="${ptsPx(m.pts, W, H)}" fill="#000"/>`).join('')}</g></mask></defs>`;
+        svg += `<rect width="${W}" height="${H}" fill="url(#mkchk)" fill-opacity=".85" mask="url(#mkinv)"/>`;
+      }
+      mk.masks.forEach((m, p) => {
+        if (m === mk.drawing) return;
+        const chosen = mk.sel?.p === p;
+        // Füllung (ggf. weich) und Umriss getrennt, damit der Umriss scharf bleibt
+        if (!mk.invert) svg += `<polygon points="${ptsPx(m.pts, W, H)}" fill="url(#mkchk)" fill-opacity=".85"${fblur}/>`;
+        svg += `<polygon points="${ptsPx(m.pts, W, H)}" fill="none" stroke="${chosen ? '#facc15' : '#22d3ee'}" stroke-width="${(chosen ? 2.5 : 1.5) * k}"/>`;
+      });
+      mk.masks.forEach((m, p) => {
+        const isDraft = m === mk.drawing;
+        if (m.shape === 'ellipse' && m.box && mk.sel?.p === p) {
+          const [x1, y1, x2, y2] = m.box;
+          svg += `<rect x="${Math.min(x1, x2) * W}" y="${Math.min(y1, y2) * H}" width="${Math.abs(x2 - x1) * W}" height="${Math.abs(y2 - y1) * H}" fill="none" stroke="#facc15" stroke-width="${k}" stroke-dasharray="${5 * k} ${4 * k}"/>`;
+        }
+        handlesOf(m).forEach(([x, y], v) => {
+          const on = mk.sel?.p === p && mk.sel.v === v;
+          svg += `<circle cx="${x * W}" cy="${y * H}" r="${(on || (isDraft && v === 0) ? 7 : 5) * k}" fill="${on || isDraft ? '#facc15' : '#22d3ee'}" stroke="#000" stroke-width="${k}"/>`;
+        });
+        // Kantengriffe nur am gewählten Rechteck bzw. Kreis: Breite oder Höhe ändern
+        if (mk.sel?.p === p)
+          edgesOf(m).forEach(([x, y], e) => {
+            const on = mk.sel.e === e, s = (on ? 6 : 4.5) * k;
+            svg += `<rect x="${x * W - s}" y="${y * H - s}" width="${2 * s}" height="${2 * s}" rx="${k}" fill="${on ? '#facc15' : '#fff'}" stroke="#000" stroke-width="${k}"/>`;
+          });
+      });
+      if (mk.drawing?.pts.length >= 2) svg += `<polyline points="${ptsPx(mk.drawing.pts, W, H)}" fill="none" stroke="#facc15" stroke-width="${2 * k}" stroke-dasharray="${6 * k} ${4 * k}"/>`;
+      mkSvg.innerHTML = svg;
+      // Knöpfe und Hinweis
+      const q = (k2) => maskBar.querySelector(`[data-k=${k2}]`);
+      maskBar.querySelector('.mk-shapes').hidden = !!mk.drawing;
+      for (const b of maskBar.querySelectorAll('.mk-shapes button')) b.classList.toggle('on', b.dataset.shape === mk.tool);
+      q('close').hidden = !mk.drawing;
+      q('close').disabled = (mk.drawing?.pts.length ?? 0) < 6;
+      q('del').disabled = !mk.sel || !!mk.drawing;
+      q('scale').classList.toggle('on', mk.scale);
+      q('scale').disabled = !!mk.drawing;
+      for (const b of maskBar.querySelectorAll('.mk-nudge')) {
+        b.disabled = !mk.sel || !!mk.drawing;
+        b.title = mk.scale ? t({ l: 'Schmaler', r: 'Breiter', u: 'Höher', d: 'Niedriger' }[b.dataset.k]) : t({ l: 'Fein nach links', r: 'Fein nach rechts', u: 'Fein nach oben', d: 'Fein nach unten' }[b.dataset.k]);
+      }
+      maskBar.classList.toggle('scaling', mk.scale);
+      q('clear').disabled = !mk.masks.length;
+      maskBar.querySelector('.mk-hint').textContent = !mk.screenId
+        ? t('Screen wählen')
+        : mk.drawing
+          ? t('Ecken antippen – zum Schließen den ersten Punkt antippen')
+          : mk.tool
+            ? t('Auf der Fläche aufziehen – oder antippen für Standardgröße')
+            : mk.scale && !(mk.sel?.e >= 0)
+              ? mk.sel
+                ? t('Skalieren: ziehen = größer/kleiner, ← → Breite, ↑ ↓ Höhe')
+                : t('Skalieren: Bereich antippen')
+          : mk.sel?.e >= 0
+            ? mk.scale
+              ? t('Kante gewählt: ziehen ändert Breite bzw. Höhe beidseitig um die Mitte')
+              : t('Kante gewählt: ziehen oder Pfeile ändern Breite bzw. Höhe')
+          : mk.sel?.v >= 0
+            ? t('Punkt gewählt: ziehen oder mit den Pfeilen fein verschieben')
+            : mk.sel
+              ? t('Bereich gewählt: ziehen verschiebt ihn, Ecken einzeln anfassen')
+              : mk.masks.length
+                ? mk.masks.length === 1 ? t('1 Bereich – antippen zum Bearbeiten') : t('{0} Bereiche – antippen zum Bearbeiten', mk.masks.length)
+                : t('Form wählen: ⬠ frei, ▭ Rechteck, ◯ Kreis, △ Dreieck');
+    }
+
+    // Änderungen höchstens einmal pro Bild an den Server (der Screen zeichnet live mit)
+    let maskSendFrame = 0;
+    function sendMasks() {
+      maskSendFrame ||= requestAnimationFrame(() => {
+        maskSendFrame = 0;
+        if (!mk.screenId) return;
+        send({
+          type: 'mask',
+          op: 'set',
+          masks: mk.masks.filter((m) => m !== mk.drawing),
+          draft: mk.drawing?.pts ?? null,
+          sel: mk.sel && !mk.drawing ? { p: mk.masks.filter((m) => m !== mk.drawing).indexOf(mk.masks[mk.sel.p]), v: mk.sel.v, e: mk.sel.e ?? -1 } : null,
+        });
+      });
+    }
+    const changedMask = () => {
+      renderMaskEditor();
+      sendMasks();
+    };
+
+    // Fingerposition → Punkt auf dem Screen (0–1)
+    function mkPoint(e) {
+      const r = mkSvg.getBoundingClientRect();
+      return [Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)), Math.min(1, Math.max(0, (e.clientY - r.top) / r.height))];
+    }
+    /** Abstand zweier Punkte (0–1) in Bildschirmpixeln der Zeichenfläche */
+    function mkPx(a, b) {
+      const r = mkSvg.getBoundingClientRect();
+      return Math.hypot((a[0] - b[0]) * r.width, (a[1] - b[1]) * r.height);
+    }
+    function mkDist(a, pts, i) {
+      const r = mkSvg.getBoundingClientRect();
+      return Math.hypot((a[0] - pts[i]) * r.width, (a[1] - pts[i + 1]) * r.height);
+    }
+    function inPolygon([x, y], pts) {
+      let inside = false;
+      for (let i = 0, j = pts.length - 2; i < pts.length; j = i, i += 2) {
+        const [xi, yi, xj, yj] = [pts[i], pts[i + 1], pts[j], pts[j + 1]];
+        if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+      }
+      return inside;
+    }
+    /**
+     * Kante e verschieben: Rechteck – beide Ecken senkrecht zur Kante (bleibt rechteckig, auch schräg);
+     * Ellipse – die Seite ihres Rahmens. both: gegenüberliegende Kante gleich weit in die Gegenrichtung (um die Mitte).
+     * dx/dy: Verschiebung in Bildschirmanteilen (0–1).
+     */
+    function moveEdge(m, orig, e, dx, dy, both = false) {
+      if (m.shape === 'ellipse' && orig.box) {
+        const box = [...orig.box];
+        const d = e % 2 ? dx : dy; // oben/unten: senkrecht, rechts/links: waagerecht
+        const [i, j] = [[1, 3], [2, 0], [3, 1], [0, 2]][e]; // eigene Seite, gegenüberliegende Seite
+        box[i] = r4(box[i] + d);
+        if (both) box[j] = r4(box[j] - d);
+        m.box = box;
+        return shapeFromBox(m);
+      }
+      const p = [...orig.pts];
+      const a = e * 2, b = ((e + 1) % 4) * 2;
+      // Normale der Kante in Bildschirmpixeln (x mal Seitenverhältnis), Verschiebung darauf projiziert
+      const ex = (p[b] - p[a]) * mk.aspect, ey = p[b + 1] - p[a + 1];
+      const len = Math.hypot(ex, ey) || 1;
+      const nx = -ey / len, ny = ex / len;
+      const dist = dx * mk.aspect * nx + dy * ny;
+      const mx = (nx * dist) / mk.aspect, my = ny * dist;
+      for (const i of [a, b]) (p[i] = r4(p[i] + mx)), (p[i + 1] = r4(p[i + 1] + my));
+      if (both) {
+        const c = ((e + 2) % 4) * 2, d2 = ((e + 3) % 4) * 2;
+        for (const i of [c, d2]) (p[i] = r4(p[i] - mx)), (p[i + 1] = r4(p[i + 1] - my));
+      }
+      m.pts = p;
+    }
+
+    /** Mitte einer Form (Mitte ihres Rahmens bzw. ihrer Eckpunkte) */
+    function shapeCenter(m) {
+      const xs = [], ys = [];
+      for (const [x, y] of m.shape === 'ellipse' && m.box ? handlesOf(m) : handlesOf({ pts: m.pts })) xs.push(x), ys.push(y);
+      return [(Math.min(...xs) + Math.max(...xs)) / 2, (Math.min(...ys) + Math.max(...ys)) / 2];
+    }
+    /** Form um ihre Mitte skalieren: sx/sy bezogen auf den Ausgangszustand orig ({ pts, box }) */
+    function scaleShape(m, orig, c, sx, sy) {
+      const f = (n, i) => r4(Math.min(1.5, Math.max(-0.5, c[i % 2] + (n - c[i % 2]) * (i % 2 ? sy : sx))));
+      if (orig.box) {
+        m.box = orig.box.map(f);
+        shapeFromBox(m);
+      } else m.pts = orig.pts.map(f);
+    }
+    const snapshot = (m) => ({ pts: [...m.pts], box: m.box && [...m.box] });
+
+    /** Punkte einer Form aus ihrem Rahmen (beim Aufziehen; die Ellipse auch beim Bearbeiten) */
+    function shapeFromBox(m) {
+      const [x1, y1, x2, y2] = m.box;
+      if (m.shape === 'ellipse') m.pts = ellipsePts(m.box);
+      else if (m.shape === 'tri') m.pts = [(x1 + x2) / 2, Math.min(y1, y2), Math.max(x1, x2), Math.max(y1, y2), Math.min(x1, x2), Math.max(y1, y2)].map(r4);
+      else m.pts = [x1, y1, x2, y1, x2, y2, x1, y2].map(r4);
+    }
+    /** Aufziehen beendet: angetippt = Standardgröße (auf dem Screen quadratisch bzw. kreisrund) */
+    function finishShape(m, start) {
+      const [x1, y1, x2, y2] = m.box;
+      const r = mkStage.getBoundingClientRect();
+      if (Math.abs(x2 - x1) * r.width < 12 && Math.abs(y2 - y1) * r.height < 12) {
+        const w = 0.07, h = 0.07 * mk.aspect; // halbe Kantenlänge, auf dem Screen gleich lang
+        m.box = [start[0] - w, start[1] - h, start[0] + w, start[1] + h].map(r4);
+      } else m.box = [Math.min(x1, x2), Math.min(y1, y2), Math.max(x1, x2), Math.max(y1, y2)].map(r4);
+      shapeFromBox(m);
+      if (m.shape !== 'ellipse') delete m.box; // Rechteck/Dreieck: ab jetzt freie Eckpunkte
+      changedMask();
+    }
+
+    function finishDrawing() {
+      const d = mk.drawing;
+      mk.drawing = null;
+      if (d.pts.length < 6) mk.masks = mk.masks.filter((m) => m !== d); // weniger als 3 Ecken: verwerfen
+      else mk.sel = { p: mk.masks.indexOf(d), v: -1 };
+      changedMask();
+    }
+
+    mkSvg.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!mk.screenId) return;
+      const pt = mkPoint(e);
+      mkSvg.setPointerCapture(e.pointerId);
+      mkFingers.set(e.pointerId, pt);
+      // zweiter Finger auf einem gewählten Bereich: Zwei-Finger-Zoom (gleichmäßig um die Mitte)
+      if (mkFingers.size === 2 && mk.sel && !mk.drawing) {
+        const m = mk.masks[mk.sel.p];
+        const [a, b] = [...mkFingers.values()];
+        mk.drag = { type: 'pinch', m, c: shapeCenter(m), d0: mkPx(a, b), orig: snapshot(m) };
+        return;
+      }
+      if (mkFingers.size > 1) return;
+      const edgeHit = mk.sel && (edgesOf(mk.masks[mk.sel.p] ?? { pts: [] }) ?? []).some((h) => mkDist(pt, h, 0) < HIT);
+      if (mk.scale && !mk.drawing && !mk.tool && !edgeHit) {
+        // Skalier-Modus: Bereich unter dem Finger wählen (sonst den gewählten), dann ziehen = Größe
+        for (let p = mk.masks.length - 1; p >= 0; p--) if (inPolygon(pt, mk.masks[p].pts)) { mk.sel = { p, v: -1 }; break; }
+        if (mk.sel) {
+          const m = mk.masks[mk.sel.p];
+          mk.sel.v = -1;
+          mk.drag = { type: 'scale', m, c: shapeCenter(m), start: pt, orig: snapshot(m) };
+        }
+        return changedMask();
+      }
+      if (mk.tool) {
+        // Form aufziehen: Rahmen von hier bis zum Loslassen
+        const m = { id: Math.random().toString(36).slice(2, 10), shape: mk.tool, box: [...pt, ...pt], pts: [] };
+        shapeFromBox(m);
+        mk.masks.push(m);
+        mk.sel = { p: mk.masks.length - 1, v: -1 };
+        mk.drag = { type: 'create', m, start: pt };
+        mk.tool = null;
+        return changedMask();
+      }
+      if (mk.drawing) {
+        // Zeichnen: Punkt setzen; erster Punkt antippen schließt den Bereich
+        if (mk.drawing.pts.length >= 6 && mkDist(pt, mk.drawing.pts, 0) < HIT) return finishDrawing();
+        mk.drawing.pts.push(...pt);
+        mk.drag = { type: 'v', m: mk.drawing, i: mk.drawing.pts.length - 2 }; // gleich nachziehen möglich
+        return changedMask();
+      }
+      // Kantengriff des gewählten Bereichs: Breite bzw. Höhe ändern (im Skalier-Modus beidseitig)
+      if (mk.sel) {
+        const m = mk.masks[mk.sel.p];
+        const es = m ? edgesOf(m) : [];
+        for (let e = 0; e < es.length; e++) {
+          if (mkDist(pt, es[e], 0) < HIT) {
+            mk.sel = { p: mk.sel.p, v: -1, e };
+            mk.drag = { type: 'edge', m, e, start: pt, orig: snapshot(m), both: mk.scale };
+            return changedMask();
+          }
+        }
+      }
+      // Eckpunkt anfassen (gewählter Bereich zuerst), sonst Bereich wählen und verschieben
+      const order = mk.masks.map((m, p) => p).sort((a, b) => (b === mk.sel?.p) - (a === mk.sel?.p));
+      for (const p of order) {
+        const m = mk.masks[p];
+        const hs = handlesOf(m);
+        for (let v = 0; v < hs.length; v++) {
+          if (mkDist(pt, hs[v], 0) < HIT) {
+            mk.sel = { p, v, e: -1 };
+            // Ellipse: Rahmenecke ziehen, sonst den Eckpunkt
+            mk.drag = m.shape === 'ellipse' && m.box ? { type: 'corner', m, c: v } : { type: 'v', m, i: v * 2 };
+            return changedMask();
+          }
+        }
+      }
+      for (let p = mk.masks.length - 1; p >= 0; p--) {
+        if (inPolygon(pt, mk.masks[p].pts)) {
+          const m = mk.masks[p];
+          mk.sel = { p, v: -1, e: -1 };
+          mk.drag = { type: 'poly', m, start: pt, orig: [...m.pts], origBox: m.box && [...m.box] };
+          return changedMask();
+        }
+      }
+      mk.sel = null;
+      changedMask();
+    });
+    mkSvg.addEventListener('pointermove', (e) => {
+      if (mkFingers.has(e.pointerId)) mkFingers.set(e.pointerId, mkPoint(e));
+      if (!mk.drag) return;
+      e.preventDefault();
+      const pt = mkPoint(e);
+      const d = mk.drag;
+      if (d.type === 'pinch') {
+        if (mkFingers.size < 2) return;
+        const [a, b] = [...mkFingers.values()];
+        const f = Math.max(0.05, mkPx(a, b) / (d.d0 || 1));
+        scaleShape(d.m, d.orig, d.c, f, f);
+        return changedMask();
+      }
+      if (d.type === 'edge') {
+        moveEdge(d.m, d.orig, d.e, pt[0] - d.start[0], pt[1] - d.start[1], d.both);
+        return changedMask();
+      }
+      if (d.type === 'scale') {
+        // Faktor = Abstand zur Mitte jetzt / beim Aufsetzen (nach außen größer, nach innen kleiner)
+        const d0 = mkPx(d.start, d.c);
+        if (d0 < 6) return;
+        const f = Math.max(0.05, mkPx(pt, d.c) / d0);
+        scaleShape(d.m, d.orig, d.c, f, f);
+        return changedMask();
+      }
+      const clamp = (n) => Math.min(1.5, Math.max(-0.5, n));
+      if (d.type === 'v') [d.m.pts[d.i], d.m.pts[d.i + 1]] = pt;
+      else if (d.type === 'create') {
+        d.m.box = [...d.start, ...pt];
+        shapeFromBox(d.m);
+      } else if (d.type === 'corner') {
+        // Rahmenecke 0 oben links, 1 oben rechts, 2 unten rechts, 3 unten links
+        const [xi, yi] = [[0, 1], [2, 1], [2, 3], [0, 3]][d.c];
+        d.m.box[xi] = pt[0];
+        d.m.box[yi] = pt[1];
+        shapeFromBox(d.m);
+      } else {
+        d.m.pts = d.orig.map((n, i) => clamp(n + pt[i % 2] - d.start[i % 2]));
+        if (d.origBox) d.m.box = d.origBox.map((n, i) => clamp(n + pt[i % 2] - d.start[i % 2]));
+      }
+      changedMask();
+    });
+    const mkUp = (e) => {
+      mkFingers.delete(e.pointerId);
+      if (mk.drag?.type === 'pinch' && mkFingers.size) return; // ein Finger liegt noch: Zoom endet erst mit beiden
+      if (mk.drag?.type === 'create') finishShape(mk.drag.m, mk.drag.start);
+      mk.drag = null;
+    };
+    mkSvg.addEventListener('pointerup', mkUp);
+    mkSvg.addEventListener('pointercancel', mkUp);
+
+    // Feinschritt; gedrückt halten wiederholt
+    function nudge(dir) {
+      if (!mk.sel || mk.drawing) return;
+      const [dx, dy] = { l: [-STEP, 0], r: [STEP, 0], u: [0, -STEP], d: [0, STEP] }[dir];
+      const m = mk.masks[mk.sel.p];
+      if (!m) return;
+      if (mk.sel.e >= 0) {
+        // gewählte Kante fein verschieben (im Skalier-Modus beidseitig)
+        moveEdge(m, snapshot(m), mk.sel.e, dx, dy, mk.scale);
+        return changedMask();
+      }
+      if (mk.scale) {
+        // Skalier-Modus: ← schmaler, → breiter, ↑ höher, ↓ niedriger (je 1 % um die Mitte)
+        const [sx, sy] = { l: [0.99, 1], r: [1.01, 1], u: [1, 1.01], d: [1, 0.99] }[dir];
+        mk.sel.v = -1;
+        scaleShape(m, snapshot(m), shapeCenter(m), sx, sy);
+        return changedMask();
+      }
+      const move = (i) => {
+        m.pts[i] = Math.round(Math.min(1.5, Math.max(-0.5, m.pts[i] + dx)) * 10000) / 10000;
+        m.pts[i + 1] = Math.round(Math.min(1.5, Math.max(-0.5, m.pts[i + 1] + dy)) * 10000) / 10000;
+      };
+      if (m.shape === 'ellipse' && m.box) {
+        // Ellipse: gewählte Rahmenecke bzw. ganzen Rahmen verschieben
+        const corners = mk.sel.v >= 0 ? [[[0, 1], [2, 1], [2, 3], [0, 3]][mk.sel.v]] : [[0, 1], [2, 3]];
+        for (const [xi, yi] of corners) {
+          m.box[xi] = r4(Math.min(1.5, Math.max(-0.5, m.box[xi] + dx)));
+          m.box[yi] = r4(Math.min(1.5, Math.max(-0.5, m.box[yi] + dy)));
+        }
+        shapeFromBox(m);
+      } else if (mk.sel.v >= 0) move(mk.sel.v * 2);
+      else for (let i = 0; i < m.pts.length; i += 2) move(i);
+      changedMask();
+    }
+    let nudgeTimer = null;
+    const stopNudge = () => clearTimeout(nudgeTimer);
+    for (const b of maskBar.querySelectorAll('.mk-nudge')) {
+      b.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        const dir = b.dataset.k;
+        nudge(dir);
+        const again = (delay) => (nudgeTimer = setTimeout(() => (nudge(dir), again(60)), delay));
+        again(380);
+      });
+      for (const ev of ['pointerup', 'pointerleave', 'pointercancel']) b.addEventListener(ev, stopNudge);
+    }
+
+    maskBar.addEventListener('pointerdown', (e) => e.stopPropagation());
+    maskBar.addEventListener('click', async (e) => {
+      e.stopPropagation(); // kein Menü
+      const chip = e.target.closest('[data-screen]');
+      if (chip) return send({ type: 'mask', op: 'edit', screenId: chip.dataset.screen });
+      const k = e.target.closest('[data-k]')?.dataset.k;
+      if (k === 'add') {
+        const shape = e.target.closest('[data-shape]').dataset.shape;
+        mk.sel = null;
+        mk.scale = false;
+        if (shape === 'poly') {
+          mk.tool = null;
+          mk.drawing = { id: Math.random().toString(36).slice(2, 10), shape: 'poly', pts: [] };
+          mk.masks.push(mk.drawing);
+        } else mk.tool = mk.tool === shape ? null : shape; // nochmal antippen = abwählen
+        changedMask();
+      } else if (k === 'scale') {
+        mk.scale = !mk.scale;
+        mk.tool = null;
+        if (mk.sel) mk.sel.v = -1; // skaliert wird immer der ganze Bereich
+        changedMask();
+      } else if (k === 'close' && mk.drawing) finishDrawing();
+      else if (k === 'undo') {
+        if (mk.drawing) {
+          mk.drawing.pts.splice(-2, 2);
+          if (!mk.drawing.pts.length) {
+            mk.masks = mk.masks.filter((m) => m !== mk.drawing);
+            mk.drawing = null;
+          }
+        } else if (mk.sel?.v >= 0 && mk.masks[mk.sel.p]?.shape !== 'ellipse' && mk.masks[mk.sel.p]?.pts.length > 6) {
+          mk.masks[mk.sel.p].pts.splice(mk.sel.v * 2, 2); // gewählten Punkt löschen (mindestens 3 bleiben)
+          mk.sel.v = -1;
+        }
+        changedMask();
+      } else if (k === 'del' && mk.sel) {
+        mk.masks.splice(mk.sel.p, 1);
+        mk.sel = null;
+        changedMask();
+      } else if (k === 'clear' && mk.masks.length) {
+        if (!(await askScreen(t('Alle {0} Bereiche der Maske löschen?', mk.masks.length), t('Der Screen zeigt danach wieder die ganze Fläche.')))) return;
+        mk.masks = [];
+        mk.sel = null;
+        mk.drawing = null;
+        changedMask();
+      }
+    });
+    maskBar.querySelector('[data-k=on]').addEventListener('change', (e) => send({ type: 'mask', op: 'enable', on: e.target.checked }));
+    // Weiche Kanten: live (höchstens einmal pro Bild an den Server)
+    let softFrame = 0;
+    const softInput = maskBar.querySelector('[data-k=soft]');
+    softInput.addEventListener('input', () => {
+      mk.feather = Number(softInput.value);
+      maskBar.querySelector('.mk-softval').textContent = mk.feather;
+      renderMaskEditor();
+      softFrame ||= requestAnimationFrame(() => {
+        softFrame = 0;
+        send({ type: 'mask', op: 'feather', value: mk.feather });
+      });
+    });
+    softInput.addEventListener('pointerdown', () => (mk.softDragging = true));
+    addEventListener('pointerup', () => (mk.softDragging = false));
+    maskBar.querySelector('[data-k=inv]').addEventListener('change', (e) => {
+      mk.invert = e.target.checked;
+      renderMaskEditor();
+      send({ type: 'mask', op: 'invert', on: e.target.checked });
+    });
+
     remoteBar.addEventListener('click', (e) => {
       e.stopPropagation(); // kein Menü
       const action = e.target.closest('button')?.dataset.r;
+      if (action === 'mask') return setMaskBar(maskBar.hidden);
+      if (['pen', 'sound', 'list'].includes(action)) setMaskBar(false);
       if (action === 'pen') {
         setSoundBar(false);
         setListBar(false);

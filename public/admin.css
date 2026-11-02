@@ -563,3 +563,6 @@ select.pl-select { font-weight: 600; font-size: 14px; flex: 0 0 33%; width: 33%;
 .ask-input { width: 100%; box-sizing: border-box; margin-top: 12px; font-size: 15px; padding: 8px 10px; }
 .dialog.ask .dialog-actions { margin-top: 18px; gap: 8px; }
 .dialog.ask .dialog-actions button { min-width: 96px; padding: 7px 14px; }
+
+/* Projektions-Maske beim Screen */
+.mask-row { gap: 6px; font-size: 13px; }
