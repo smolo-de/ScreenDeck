@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ScreenDeck Verwaltung</title>
+  <link rel="icon" href="/logo.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/admin.css?v={{VERSION}}">
+  <script>window.PAGE_VERSION = '{{VERSION}}';</script>
+  <script src="/fonts.js?v={{VERSION}}"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><img class="logo" src="/logo.svg" alt=""> ScreenDeck</div>
+    <div class="conn" id="conn"><span class="dot"></span><span id="connText">Verbinde…</span></div>
+  </header>
+
+  <main>
+    <section class="card controls">
+      <div class="control">
+        <label>Verteilung</label>
+        <div class="segmented" id="distribution">
+          <button data-value="order">Der Reihe nach</button>
+          <button data-value="random">Zufall</button>
+        </div>
+      </div>
+      <div class="control">
+        <label>Automatisch wechseln</label>
+        <div class="row">
+          <label class="switch"><input type="checkbox" id="autoAdvance"><span></span></label>
+          <span>alle</span>
+          <input type="number" id="interval" min="3" max="86400" step="1"> <span>Sek.</span>
+        </div>
+      </div>
+      <div class="control">
+        <label>&nbsp;</label>
+        <div class="row">
+          <button class="primary" id="next">Nächster Wechsel ⏭</button>
+          <span class="countdown" id="countdown"></span>
+        </div>
+      </div>
+      <div class="control">
+        <label>Alle Screens</label>
+        <div class="segmented modes" id="allModes">
+          <button data-mode="play" title="Alle abspielen">▶ Play</button>
+          <button data-mode="pause" title="Alle pausieren">⏸ Pause</button>
+          <button data-mode="image" title="Alle zeigen ihr Standbild">🖼 Bild</button>
+          <button data-mode="dark" title="Alle dunkel schalten">⬛ Dunkel</button>
+        </div>
+      </div>
+      <p class="help" id="modeHelp"></p>
+    </section>
+
+    <div class="columns">
+      <section class="card">
+        <div class="card-head">
+          <h2>Screens <span class="count" id="screenCount"></span></h2>
+        </div>
+        <p class="help">
+          Auf jedem Gerät im Browser öffnen: <span id="screenUrls"></span><br>
+          Optional mit Namen, z.&nbsp;B. <code>/screen?name=Beamer%20Saal</code>. Reihenfolge per Ziehen am ⋮⋮ ändern.
+        </p>
+        <div class="list" id="screens"></div>
+      </section>
+
+      <section class="card">
+        <div class="card-head">
+          <h2>Playlist <span class="count" id="itemCount"></span></h2>
+        </div>
+
+        <div class="add">
+          <label class="dropzone" id="dropzone">
+            <input type="file" id="fileInput" multiple accept="image/*,video/*" hidden>
+            <span>Bilder / Videos hierher ziehen oder <u>auswählen</u></span>
+            <div class="progress" id="progress"><div></div></div>
+          </label>
+          <label class="dup-option" title="Erkannt wird der Inhalt, nicht der Dateiname">Doppelte Dateien
+            <select id="duplicates" class="mini">
+              <option value="skip">aussortieren</option>
+              <option value="add">trotzdem hinzufügen</option>
+            </select>
+          </label>
+          <details>
+            <summary>Webseite / URL hinzufügen</summary>
+            <form id="urlForm" class="form">
+              <input type="url" name="src" placeholder="https://…" required>
+              <input type="text" name="title" placeholder="Titel (optional)">
+              <button>Hinzufügen</button>
+            </form>
+          </details>
+          <details>
+            <summary>Text hinzufügen</summary>
+            <form id="textForm" class="form">
+              <textarea name="text" rows="3" placeholder="Text, der auf dem Screen erscheint" required></textarea>
+              <div class="row">
+                <label class="color">Anzeigedauer <input type="number" name="duration" min="0" max="86400" placeholder="–" class="dur"> Sek.</label>
+                <label class="color"><input type="checkbox" name="showCountdown"> Countdown auf dem Screen anzeigen</label>
+              </div>
+              <div class="row">
+                <label class="color">Schrift <select name="font" class="font-select"></select></label>
+                <label class="color">Ecken <select name="edge" class="edge-select"></select></label>
+              </div>
+              <p class="help small">Ohne Anzeigedauer bleibt der Text bis zum nächsten Wechsel stehen. Mit Anzeigedauer wird er (wie ein Video) nicht vom Timer unterbrochen.</p>
+              <div class="row">
+                <label class="color">Hintergrund <input type="color" name="bg" value="#1d4ed8"></label>
+                <label class="color">Schrift <input type="color" name="color" value="#ffffff"></label>
+                <button>Hinzufügen</button>
+              </div>
+            </form>
+          </details>
+        </div>
+
+        <div class="list" id="playlist"></div>
+      </section>
+    </div>
+  </main>
+
+  <input type="file" id="standbyInput" accept="image/*" hidden>
+  <div class="toast" id="toast"></div>
+  <script src="/admin.js?v={{VERSION}}"></script>
+</body>
+</html>

@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2563eb"/>
+      <stop offset="1" stop-color="#7c3aed"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="url(#bg)"/>
+  <!-- Stapel aus Screens (das „Deck“) -->
+  <rect x="22" y="11" width="30" height="20" rx="4" fill="#fff" opacity=".3"/>
+  <rect x="17" y="17" width="30" height="20" rx="4" fill="#fff" opacity=".55"/>
+  <rect x="12" y="23" width="30" height="20" rx="4" fill="#fff"/>
+  <path d="M24 28.5v9l8-4.5z" fill="#4f46e5"/>
+  <!-- Steuerpult -->
+  <rect x="10" y="48" width="44" height="5" rx="2.5" fill="#fff" opacity=".9"/>
+</svg>
