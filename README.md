@@ -17,7 +17,7 @@ npm start          # or: npm run dev (restarts on changes)
 
 **Connect via QR code:** `http://<server>/connect` shows a QR code with the screen address. It contains the IP address instead of the name, so it works on Android too. Opened from the admin (“▦ QR code” next to the screen addresses), it adds a second code for the admin. On a screen, “Connect device” in the menu shows the QR code right there, e.g. on the TV, so a smartphone can scan it. The server generates the codes itself, no internet needed.
 
-**Without a port:** The server also listens on port 80, so `http://<server-ip>` or `http://screendeck.local` works without `:3000`. If port 80 is taken (e.g. by another web server), everything runs on 3000 as usual and the console says so. Turn it off with `EXTRA_PORT=0`, use another port with `EXTRA_PORT=8080`. If the Windows firewall only allows port 3000, port 80 has to be allowed there as well.
+**Without a port:** The server also listens on port 80, so `http://<server-ip>` or `http://screendeck.local` works without `:3000`. If port 80 is taken (e.g. by another web server), everything runs on 3000 as usual and the console says so. Under **⚙ Settings → Network → Ports** you can change the additional port (e.g. 8080, 0 = off); it takes effect immediately and shows whether the port is free. The main port can be set there too and applies after a restart. The environment variables `PORT` and `EXTRA_PORT` take precedence over the settings. If the Windows firewall only allows port 3000, port 80 has to be allowed there as well.
 
 **Network name:** The server is also reachable as `http://screendeck.local`, without an IP address (mDNS). This works with Windows, macOS, iPhone/iPad and newer Android devices. Some older Android TVs do not know such names; use the IP address there. Change the name under ⚙ Settings → “Network name”; empty turns it off. With several ScreenDeck servers on the same network, choose different names.
 Tip: Many routers (e.g. Fritz!Box) also make devices reachable by their name themselves, e.g. `http://<pc-name>.fritz.box`. That works on older TVs too.
@@ -59,6 +59,9 @@ Optional URL parameters:
   - Can be turned off under ⚙ Settings (“Zoom with finger gestures”). With zoom enabled, a single tap waits briefly (0.3 s) to see whether a second one follows.
 - **Remote control:** One screen (e.g. a smartphone) controls others (e.g. the TV). Choose “Remote control” in the menu, tap the screens that should follow (preselected: all connected ones), then “Start”.
   - **Permission:** only screens allowed in the admin (“Remote control: allowed” on the screen, under ▾ in the compact view) show the button in the menu. The default is “blocked”. Revoking the permission ends a running remote control immediately.
+  - **📱 Pair a smartphone (quick):** in the admin, open “📱 Pair smartphone” next to the screen addresses and scan the QR code. The smartphone instantly becomes a remote control for all connected screens, without enabling it and without the screen PIN. The code contains a key and is only shown to the admin. “New code” under ⚙ Settings → Screens invalidates it; paired devices stay enabled (can be blocked in the screen list).
+  - **▦ Playlist** (in the bar): previews of all enabled entries, the current one outlined in blue. Tapping shows the entry immediately on all controlled screens. Changes to the playlist appear automatically. At the top you can **switch the playlist**; it then plays on the controlled screens right away. **“＋ New”** creates an empty playlist and plays it; everything you upload afterwards goes straight into it. **🗑** turns on delete mode: tap tiles to select them (“All” selects all or none), “Delete (n)” asks once. If a deleted entry is currently playing, the screens show the next one. Uploaded files are deleted too unless another playlist uses them; files from media folders are kept.
+  - **⤒ Upload** (in the bar): opens the gallery or camera on the smartphone. Photos and videos go into the active playlist, music into the music list, duplicates are skipped. The first new image/video plays immediately on all controlled screens. A bar at the top shows the progress. Only the controlling device may upload, secured by a key that ends with the remote control.
   - All screens involved show the same entry; automatic switching is paused for them. The other screens keep running as normal.
   - The controlling device shows a bar at the bottom: ‹ › steps through the enabled playlist entries; alternatively swipe horizontally or use the arrow keys. Plus “Reset zoom” and ✕ (stop).
   - **Zoom** on the controlling device (two fingers, dragging, double tap) is mirrored to the controlled screens relative to the image, so the same image point is centered even with a different aspect ratio (phone in portrait, TV in landscape).
@@ -114,7 +117,13 @@ Web pages (iframe) control their own sound and are not affected by this setting.
 If there is no confirmation within 10 s, the server sends the content again (up to 3 times). After that it can be triggered manually via “resend”.
 Videos are monitored continuously: paused videos are restarted, stalled ones are reported as errors.
 
-**Add, Media, Music** (right column): three separate areas, each collapsible by clicking its header (▾/▸). The browser remembers the state.
+**Add, Media, Music** (right column): three separate areas, each collapsible by clicking its header (▾/▸). The browser remembers the state. The **Playlist** can be collapsed the same way; the selection, status and “Play on screens” stay visible.
+
+**Control bar at the top** (distribution, auto switch, “Next ⏭” for the next switch, all screens): a full-width band in a single row right below the header. On large screens it stays in place while scrolling. ⓘ shows or hides the explanation of the distribution modes.
+
+**Current position in the playlist:** entries currently shown on a connected screen get a green border and a badge with the screen name (● TV). “◉ Current position” jumps there; further clicks cycle through all shown entries.
+
+**⚙ Settings** open as a window above the page, with the sections Screens, Network, Image quality, Media sources and Access protection. Esc, ✕ or a click outside closes it. The browser remembers the last section.
 - **Add:** upload via drag & drop, handling of duplicate files, web page/URL and text.
 - **Media:** the content of the **media sources** or of the uploaded files (see below).
 - **Music:** see [Music](#music).
@@ -124,6 +133,8 @@ Videos are monitored continuously: paused videos are restarted, stalled ones are
   - Each source gets a name (can be renamed). When adding, the server checks that the folder is reachable.
   - Removing a source leaves its files and the playlist entries from it untouched.
   - Network drives must be reachable for the user account the server runs under. If it runs as a service or “as administrator”, mapped drive letters are often invisible; use the network path instead.
+  - **Finding a folder:** “📂 Browse” next to the path opens a folder browser. Without a path it shows the drives; for `\\Servername` (e.g. `\\sugo`) it lists the server's shares, then the subfolders. ⬆ goes up one level, “✓ Choose this folder” takes the path and suggests the folder name as the name. If the server needs a sign-in, enter user and password first.
+  - **Signing in to shares (Windows):** for network paths (`\\Server\Share`) you can enter a user and password, when adding the source or later via 🔑. The server signs in with `net use`, also after every restart. The password is stored in `data/state.json` encrypted with the server's Windows account (DPAPI) and is never sent to the UI. If the server later runs under a different account, it has to be entered again. Windows allows only one sign-in per server, so all shares on the same server use the same user. On Linux/macOS, mount the share in the system.
 - At the top of the area you choose the source (or “⬆ Uploaded”). Images and videos in it are listed with subfolders, preview and search.
 - **Drag files into the playlist:** a line shows where the entry lands. Alternatively use ＋ (append) or “Add all” for the whole folder. “✓ in Playlist” marks files that are already included.
 - Files are **not copied** but played directly from the folder. Deleting an entry from the playlist keeps the original file.
@@ -155,9 +166,15 @@ Videos are monitored continuously: paused videos are restarted, stalled ones are
 - `▶ now` plays a queued entry immediately, `✕` removes it, “clear” empties the queue.
 - Pinned screens also play their queue and then return to their fixed content.
 
-**Distribution:**
-- **In order:** Screen 1 shows entry 1, screen 2 entry 2 … On a switch every screen gets the next entry that is not already playing on another screen.
-- **Random:** Every screen gets a random entry. Duplicates and repeats are avoided where possible.
+**Distribution:** two independent switches – *what* the screens show (**⇉ All the same** or **▦ Different**) and *in which order* (**→ In order** or **🎲 Random**). That gives four combinations:
+
+| | → In order | 🎲 Random |
+|---|---|---|
+| **▦ Different** | Screen 1 shows entry 1, screen 2 entry 2 … On a switch every screen gets the next entry that is not already playing on another screen. | Every screen gets a random entry. Duplicates and repeats are avoided where possible. |
+| **⇉ All the same** | All screens show the same entry and go through the playlist together. | All screens show the same entry, a random one at every switch (never the same one twice in a row). |
+
+ⓘ next to “Distribution” explains the current combination. An older “Random” setting is taken over as “Different + Random” on startup.
+
 - **⇉ All the same (sync):** All screens show the same content. Videos start at a common point in time, about 2 s after the switch so all screens can load. After that the screens continuously adjust their position: small deviations via slightly faster or slower playback, large ones by jumping.
   - **Shared by all:** “Next”, queue, clicking the progress bar and the end of a video apply to the whole group.
   - **Joining late:** A screen that reloads or connects later joins at the current position.
