@@ -7,25 +7,113 @@
   <link rel="icon" href="/logo.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/admin.css?v={{VERSION}}">
   <script>window.PAGE_VERSION = '{{VERSION}}';</script>
+  <script src="/i18n.js?v={{VERSION}}"></script>
   <script src="/fonts.js?v={{VERSION}}"></script>
 </head>
 <body>
   <header class="topbar">
     <div class="brand"><img class="logo" src="/logo.svg" alt=""> ScreenDeck</div>
-    <div class="conn" id="conn"><span class="dot"></span><span id="connText">Verbinde…</span></div>
+    <div class="topbar-right">
+      <div class="conn" id="conn"><span class="dot"></span><span id="connText">Verbinde…</span></div>
+      <select class="mini lang-select" data-lang-select title="Sprache / Language" aria-label="Sprache / Language" translate="no">
+        <option value="de">DE</option>
+        <option value="en">EN</option>
+      </select>
+      <button class="small" id="settingsBtn" title="Einstellungen: PIN für Verwaltung und Screens">⚙ Einstellungen</button>
+      <form method="post" action="/logout" id="logoutForm" hidden><button class="small" title="Verwaltung abmelden">Abmelden</button></form>
+    </div>
   </header>
 
   <main>
+    <section class="card" id="settingsCard" hidden>
+      <div class="card-head">
+        <h2>⚙ Einstellungen</h2>
+        <button class="icon" id="settingsClose" title="Schließen">✕</button>
+      </div>
+      <h3 class="sec-title">Screens</h3>
+      <div class="row">
+        <label class="switch"><input type="checkbox" id="screenMenu"><span></span></label>
+        <span>Menü beim Antippen eines Screens anzeigen (Name/ID, Vollbild beenden, Neu laden)</span>
+      </div>
+      <p class="help small">Ausgeschaltet schaltet Antippen nur in den Vollbildmodus, z.&nbsp;B. für öffentlich zugängliche Touch-Screens.</p>
+      <div class="row">
+        <label class="switch"><input type="checkbox" id="touchZoom"><span></span></label>
+        <span>Zoomen per Fingergeste auf Touch-Screens (zwei Finger, Doppeltippen)</span>
+      </div>
+      <p class="help small">Bilder und Texte lassen sich vergrößern und verschieben. Solange vergrößert ist, hält der Screen den Inhalt an. Nach 60&nbsp;s ohne Berührung oder beim nächsten Inhalt geht es normal weiter.</p>
+      <h3 class="sec-title">Name im Netzwerk</h3>
+      <div class="row">
+        <span>http://</span>
+        <input type="text" id="hostName" class="ms-name" placeholder="screendeck" spellcheck="false" autocomplete="off">
+        <span id="hostNameSuffix">.local:3000</span>
+      </div>
+      <p class="help small">Geräte im selben Netzwerk erreichen den Server unter diesem Namen statt über die IP-Adresse. Das klappt mit Windows, macOS, iPhone/iPad und neueren Android-Geräten. Manche ältere Android-Fernseher kennen solche Namen nicht, dort die IP-Adresse verwenden. Leer = aus.</p>
+      <h3 class="sec-title">Bildqualität für Screens</h3>
+      <div class="row">
+        <select id="imageQuality" class="mini" title="Bilder vor der Übertragung an die Screens verkleinern">
+          <option value="original">Original (unverändert)</option>
+          <option value="uhd">4K – max. 3840 px, 85 %</option>
+          <option value="fhd">Full HD – max. 1920 px, 82 %</option>
+          <option value="hd">HD – max. 1280 px, 75 %</option>
+          <option value="low">Niedrig – max. 960 px, 60 %</option>
+        </select>
+      </div>
+      <div class="row cache-row">
+        <span>Zwischenspeicher: <strong id="cacheInfo">…</strong></span>
+        <button class="icon" id="cacheRefresh" title="Neu ermitteln">↻</button>
+        <button class="small danger" id="cacheClear" title="Alle verkleinerten Bilder löschen – sie werden bei Bedarf neu erzeugt">Leeren</button>
+      </div>
+      <p class="help small">Vorgabe für alle Screens – pro Screen abweichend einstellbar (in der Screen-Liste oder im Menü am Screen). Verkleinert und komprimiert Bilder, bevor sie an die Screens gehen – spart Ladezeit und Datenmenge (z. B. Fotos vom Netzlaufwerk oder WLAN-Tablets). Die Fassung wird beim ersten Abruf erzeugt und zwischengespeichert, die Originaldateien bleiben unverändert. Videos, GIFs und SVGs werden nicht verändert.</p>
+      <h3 class="sec-title">Medienquellen</h3>
+      <p class="help small">Ordner, deren Bilder und Videos unter „Medien“ erscheinen: lokale Ordner, Netzlaufwerke (z.&nbsp;B. <code>Z:\Videos</code>) oder Netzwerkpfade (z.&nbsp;B. <code>\\NAS\Freigabe\Videos</code>). Abgespielt wird direkt von dort, nichts wird kopiert.</p>
+      <div class="ms-list" id="msList"></div>
+      <div class="row ms-add">
+        <input type="text" id="msName" class="ms-name" placeholder="Name (optional)">
+        <input type="text" id="msPath" class="media-dir" placeholder="Pfad, z. B. \\NAS\Videos oder D:\Medien" spellcheck="false">
+        <button class="small primary" id="msAdd">Einbinden</button>
+      </div>
+      <p class="help small">Netzlaufwerke müssen für das Benutzerkonto erreichbar sein, unter dem der Server läuft. Läuft der Server als Dienst oder „als Administrator“, sind verbundene Laufwerksbuchstaben oft nicht sichtbar – dann den Netzwerkpfad (<code>\\Server\Freigabe</code>) verwenden.</p>
+      <h3 class="sec-title">Zugriffsschutz</h3>
+      <p class="help">Standardmäßig ist nichts geschützt. Mit einer PIN fragt die Seite einmal danach, das Gerät bleibt danach angemeldet. Eine leere PIN bzw. „Entfernen“ hebt den Schutz wieder auf.</p>
+      <div class="sec-grid">
+        <div class="sec" data-role="admin">
+          <div class="sec-head"><strong>Verwaltung</strong> <span class="sec-state"></span></div>
+          <div class="row">
+            <input type="text" class="pin" placeholder="Neue PIN (4–32 Zeichen)" autocomplete="off" spellcheck="false">
+            <button class="small gen" title="Zufällige 6-stellige PIN erzeugen">🎲 Generieren</button>
+            <button class="small primary save">Speichern</button>
+            <button class="small danger clear">Entfernen</button>
+          </div>
+          <p class="help small">PIN gut notieren! Wer sie nicht kennt, kommt nicht mehr in die Verwaltung. Notfalls in <code>data/state.json</code> den Eintrag <code>"admin"</code> unter <code>"auth"</code> löschen und den Server neu starten.</p>
+        </div>
+        <div class="sec" data-role="screen">
+          <div class="sec-head"><strong>Screens</strong> <span class="sec-state"></span></div>
+          <div class="row">
+            <input type="text" class="pin" placeholder="Neue PIN (4–32 Zeichen)" autocomplete="off" spellcheck="false">
+            <button class="small gen" title="Zufällige 6-stellige PIN erzeugen">🎲 Generieren</button>
+            <button class="small primary save">Speichern</button>
+            <button class="small danger clear">Entfernen</button>
+          </div>
+          <p class="help small">Bereits verbundene Screens bleiben angemeldet. Neue Geräte fragen einmal nach der PIN. Für Kiosk-Geräte geht es auch direkt über die Adresse: <code>/screen?pin=123456</code>.</p>
+        </div>
+      </div>
+    </section>
+
+    <div class="banner" id="restartBanner" hidden>
+      ⚠ Der Server-Code wurde aktualisiert, läuft aber noch in der alten Version. Bitte den Server neu starten
+      (im Konsolenfenster <code>Strg+C</code>, dann <code>npm start</code>). Bis dahin funktionieren neue Funktionen evtl. nicht.
+    </div>
     <section class="card controls">
       <div class="control">
         <label>Verteilung</label>
         <div class="segmented" id="distribution">
           <button data-value="order">Der Reihe nach</button>
           <button data-value="random">Zufall</button>
+          <button data-value="sync" title="Alle Screens zeigen denselben Inhalt, Videos laufen synchron">⇉ Alle gleich</button>
         </div>
       </div>
       <div class="control">
-        <label>Automatisch wechseln</label>
+        <label title="Bilder, Webseiten und Texte ohne eigene Anzeigedauer stehen so lange. Videos laufen immer bis zum Ende.">Automatisch wechseln (Bilder &amp; Texte)</label>
         <div class="row">
           <label class="switch"><input type="checkbox" id="autoAdvance"><span></span></label>
           <span>alle</span>
@@ -52,34 +140,41 @@
     </section>
 
     <div class="columns">
-      <section class="card">
+      <section class="card" id="screensCard">
         <div class="card-head">
           <h2>Screens <span class="count" id="screenCount"></span></h2>
+          <div class="row">
+            <button class="small" id="scCompact" title="Kompakte Ansicht: eine kurze Zeile pro Screen, Details per ▾">☰ Kompakt</button>
+            <button class="small danger" id="deleteAllScreens" title="Alle Screens aus der Liste entfernen">Alle löschen</button>
+          </div>
         </div>
         <p class="help">
-          Auf jedem Gerät im Browser öffnen: <span id="screenUrls"></span><br>
+          Auf jedem Gerät im Browser öffnen: <span id="screenUrls"></span>
+          <a class="qr-link" href="/connect?admin=1" target="_blank" rel="noopener" title="QR-Codes zum Scannen mit Smartphone oder Tablet">▦ QR-Code</a><br>
           Optional mit Namen, z.&nbsp;B. <code>/screen?name=Beamer%20Saal</code>. Reihenfolge per Ziehen am ⋮⋮ ändern.
         </p>
         <div class="list" id="screens"></div>
       </section>
 
-      <section class="card">
+      <div class="side-col">
+      <section class="card collapsible" id="addCard" data-collapse="add">
         <div class="card-head">
-          <h2>Playlist <span class="count" id="itemCount"></span></h2>
+          <h2>Hinzufügen</h2>
         </div>
-
         <div class="add">
           <label class="dropzone" id="dropzone">
-            <input type="file" id="fileInput" multiple accept="image/*,video/*" hidden>
-            <span>Bilder / Videos hierher ziehen oder <u>auswählen</u></span>
+            <input type="file" id="fileInput" multiple accept="image/*,video/*,audio/*" hidden>
+            <span>Bilder, Videos oder Musik hochladen: hierher ziehen oder <u>auswählen</u></span>
             <div class="progress" id="progress"><div></div></div>
           </label>
-          <label class="dup-option" title="Erkannt wird der Inhalt, nicht der Dateiname">Doppelte Dateien
-            <select id="duplicates" class="mini">
-              <option value="skip">aussortieren</option>
-              <option value="add">trotzdem hinzufügen</option>
-            </select>
-          </label>
+          <div class="row">
+            <label class="dup-option" title="Erkannt wird der Inhalt, nicht der Dateiname">Doppelte Dateien beim Upload
+              <select id="duplicates" class="mini">
+                <option value="skip">aussortieren</option>
+                <option value="add">trotzdem hinzufügen</option>
+              </select>
+            </label>
+          </div>
           <details>
             <summary>Webseite / URL hinzufügen</summary>
             <form id="urlForm" class="form">
@@ -100,20 +195,143 @@
                 <label class="color">Schrift <select name="font" class="font-select"></select></label>
                 <label class="color">Ecken <select name="edge" class="edge-select"></select></label>
               </div>
-              <p class="help small">Ohne Anzeigedauer bleibt der Text bis zum nächsten Wechsel stehen. Mit Anzeigedauer wird er (wie ein Video) nicht vom Timer unterbrochen.</p>
+              <p class="help small">Ohne Anzeigedauer gilt die Auto-Zeit (bzw. bis zum nächsten Wechsel). Mit Anzeigedauer bestimmt der Text seine Zeit selbst.</p>
               <div class="row">
                 <label class="color">Hintergrund <input type="color" name="bg" value="#1d4ed8"></label>
-                <label class="color">Schrift <input type="color" name="color" value="#ffffff"></label>
+                <label class="color">Schriftfarbe <input type="color" name="color" value="#ffffff"></label>
                 <button>Hinzufügen</button>
               </div>
             </form>
           </details>
+        </div>
+      </section>
+
+      <section class="card collapsible" id="mediaCard" data-collapse="media">
+        <div class="card-head">
+          <h2>Medien</h2>
+        </div>
+        <div class="media-browser">
+          <div class="mb-head">
+            <select id="mbSource" class="mb-source" title="Medienquelle"></select>
+            <span class="spacer"></span>
+            <button class="small" id="mbAddAll" title="Alle angezeigten Dateien dieses Ordners an die Playlist anhängen">Alle hinzufügen</button>
+            <button class="icon" id="mbRefresh" title="Ordner neu einlesen">↻</button>
+          </div>
+          <nav class="mb-path" id="mbPath"></nav>
+          <input type="search" id="mbSearch" placeholder="In diesem Ordner suchen…">
+          <div class="mb-list" id="mbList"></div>
+          <p class="help small">Dateien in die Playlist ziehen (an die gewünschte Stelle) oder mit ＋ anhängen. Sie werden direkt aus dem Ordner abgespielt, nicht kopiert. Weitere Ordner und Netzlaufwerke einbinden unter ⚙&nbsp;Einstellungen → Medienquellen.</p>
+        </div>
+      </section>
+
+      <section class="card collapsible" id="musicCard" data-collapse="music">
+        <div class="card-head">
+          <h2>🎵 Musik <span class="count" id="musicCount"></span></h2>
+        </div>
+        <div class="mu-player">
+          <div class="mu-now">
+            <span class="mu-icon" id="muIcon">🎵</span>
+            <div class="mu-title"><strong id="muTitle">–</strong><span class="mu-sub" id="muSub"></span></div>
+          </div>
+          <div class="vprogress mu-progress" id="muProgress"><div class="bar" id="muBar" title="Klicken, um an diese Stelle zu springen"><div></div></div><span class="ptime" id="muTime"></span></div>
+          <div class="mu-transport">
+            <button class="icon" id="muPrev" title="Vorheriger Titel (bzw. an den Anfang)">⏮</button>
+            <button class="primary mu-play" id="muPlay" title="Abspielen">▶</button>
+            <button class="icon" id="muNext" title="Nächster Titel">⏭</button>
+            <button class="mu-toggle" id="muShuffle" title="Zufällige Reihenfolge">🔀</button>
+            <button class="mu-toggle" id="muRepeat" title="Liste wiederholen">🔁</button>
+            <span class="spacer"></span>
+            <span class="mu-vol" title="Lautstärke der Musik">🔈 <input type="range" id="muVolume" min="0" max="100" step="5"> <span id="muVolLabel" class="vol"></span></span>
+          </div>
+          <div class="mu-screens"><span class="mu-label">Spielt auf</span><div id="muScreens" class="mu-chips"></div></div>
+          <div class="mu-video">
+            <span class="mu-label">Bei Video mit Ton</span>
+            <select id="muVideo" class="mini">
+              <option value="duck">leiser weiterspielen</option>
+              <option value="pause">pausieren</option>
+              <option value="none">nichts ändern</option>
+            </select>
+            <label class="mu-duck">auf <input type="number" id="muDuck" min="0" max="100" step="5" class="dur"> %</label>
+          </div>
+        </div>
+        <details class="mu-add">
+          <summary>Internetradio hinzufügen</summary>
+          <form id="muRadioForm" class="form">
+            <input type="url" name="url" placeholder="Stream-Adresse, z. B. https://…/live.mp3" required>
+            <input type="text" name="title" placeholder="Name des Senders">
+            <button>Hinzufügen</button>
+          </form>
+        </details>
+        <p class="help small">MP3s und andere Audiodateien: unter „Medien“ per ＋ oder hierher ziehen. Hochgeladene Audiodateien landen automatisch hier.</p>
+        <div class="list mu-list" id="musicList"></div>
+      </section>
+      </div>
+
+      <section class="card" id="playlistCard">
+        <div class="card-head pl-head">
+          <h2>Playlist</h2>
+          <select id="plSelect" class="pl-select" title="Playlist zum Anzeigen und Bearbeiten wählen"></select>
+          <div class="pl-manage">
+            <button class="icon" id="plNew" title="Neue, leere Playlist anlegen">＋</button>
+            <button class="icon" id="plCopy" title="Diese Playlist duplizieren">⧉</button>
+            <button class="icon" id="plRename" title="Diese Playlist umbenennen">✎</button>
+            <button class="icon danger" id="plDelete" title="Diese Playlist löschen">🗑</button>
+          </div>
+          <span class="spacer"></span>
+          <button type="button" class="small" id="dedupe" hidden title="Doppelte Einträge aus der Playlist entfernen (mit Vorschau)"></button>
+        </div>
+        <div class="pl-status" id="plLiveBar">
+          <span id="plLive"></span>
+          <span class="count" id="itemCount"></span> <span class="count small" id="thumbStatus"></span>
+          <span class="spacer"></span>
+          <button class="small primary" id="plActivate" title="Diese Playlist auf den Screens abspielen">▶ Auf Screens abspielen</button>
+        </div>
+
+        <div class="pl-tools">
+          <div class="row">
+            <input type="search" id="plSearch" placeholder="Suchen (Titel, Text, URL)…">
+            <select id="plType" class="mini" title="Nach Typ filtern">
+              <option value="">Alle Typen</option>
+              <option value="video">Videos</option>
+              <option value="image">Bilder</option>
+              <option value="text">Texte</option>
+              <option value="url">Webseiten</option>
+            </select>
+            <select id="plStatus" class="mini" title="Nach Status filtern">
+              <option value="">Alle</option>
+              <option value="enabled">nur aktive</option>
+              <option value="disabled">nur deaktivierte</option>
+              <option value="dup">nur doppelte</option>
+            </select>
+            <button class="small" id="plCompact" title="Kompakte Ansicht: eine Zeile pro Eintrag, Details per ▾">☰ Kompakt</button>
+          </div>
+          <div class="row bulk" id="plBulk">
+            <label class="color" title="Alle angezeigten Einträge auswählen (Shift-Klick auf eine Checkbox wählt einen Bereich)"><input type="checkbox" id="plSelectAll"> <span id="plSelCount">Alle auswählen</span></label>
+            <span class="spacer"></span>
+            <button class="small" data-bulk="enable">Aktivieren</button>
+            <button class="small" data-bulk="disable">Deaktivieren</button>
+            <select id="plBulkQueue" class="mini" title="Ausgewählte bei einem Screen einreihen"></select>
+            <button class="small danger" data-bulk="delete">Löschen</button>
+          </div>
+          <p class="help small" id="plFilterInfo"></p>
         </div>
 
         <div class="list" id="playlist"></div>
       </section>
     </div>
   </main>
+
+  <dialog id="dedupeDialog" class="dialog">
+    <form method="dialog">
+      <h3>Doppelte Einträge entfernen</h3>
+      <p class="help" id="dedupeInfo"></p>
+      <ol class="dedupe-list" id="dedupeList"></ol>
+      <div class="row dialog-actions">
+        <button value="cancel">Abbrechen</button>
+        <button value="ok" class="danger-solid" id="dedupeOk"></button>
+      </div>
+    </form>
+  </dialog>
 
   <input type="file" id="standbyInput" accept="image/*" hidden>
   <div class="toast" id="toast"></div>

@@ -7,10 +7,13 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <title>ScreenDeck Screen</title>
   <link rel="icon" href="/logo.svg" type="image/svg+xml">
+  <script src="/i18n.js?v={{VERSION}}"></script>
   <style>
     html, body { margin: 0; height: 100%; background: #000; color: #fff; overflow: hidden; cursor: none;
       font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
     #stage, .layer { position: fixed; inset: 0; }
+    /* Zoom per Fingergeste: der Browser soll weder die Seite zoomen noch scrollen */
+    body.touch-zoom { touch-action: none; }
     .layer { opacity: 0; transition: opacity .8s ease; display: flex; align-items: center; justify-content: center; }
     .layer.visible { opacity: 1; }
     .layer img, .layer video { width: 100%; height: 100%; object-fit: contain; }
@@ -53,7 +56,179 @@
       min-height: 10px; border-radius: 50%; background: #e33; z-index: 11; display: none; }
     #status.on { display: block; }
     #hint { position: fixed; left: 50%; bottom: 3vmin; transform: translateX(-50%); z-index: 11; font-size: 14px;
-      background: rgba(255,255,255,.12); padding: 8px 16px; border-radius: 20px; transition: opacity .5s; }
+      background: rgba(255,255,255,.12); padding: 8px 16px; border-radius: 20px; transition: opacity .5s; pointer-events: none; }
+
+    /* Menü (Antippen): schwebende Karte mit Name/Status und zwei Aktionen – ✕ blendet sofort aus */
+    body.menu-open { cursor: default; }
+    #menu { position: fixed; inset: auto 0 0 0; z-index: 20; display: flex; justify-content: center;
+      padding: clamp(12px, 3vmin, 40px); padding-top: 18vmin; background: linear-gradient(to top, rgba(0,0,0,.6), transparent);
+      font-size: clamp(14px, 1.7vmin, 24px); }
+    #menu[hidden] { display: none; }
+    .m-panel { position: relative; width: min(40em, 100%); display: grid; gap: 1.1em; padding: 1.3em; color: #f3f4f6;
+      background: rgba(22, 24, 30, .78); -webkit-backdrop-filter: blur(18px) saturate(1.4); backdrop-filter: blur(18px) saturate(1.4);
+      border: 1px solid rgba(255,255,255,.12); border-radius: 1.4em; box-shadow: 0 1.2em 3em rgba(0,0,0,.45);
+      animation: m-in .28s cubic-bezier(.2,.8,.2,1); }
+    @keyframes m-in { from { opacity: 0; transform: translateY(1.2em) scale(.98); } }
+    .m-head { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: .9em; align-items: center; padding-right: 2.6em; }
+    .m-logo { width: 2.8em; height: 2.8em; display: block; }
+    .m-name { font-size: 1.45em; font-weight: 700; line-height: 1.15; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .m-meta { display: flex; flex-wrap: wrap; align-items: center; gap: .35em .7em; margin-top: .3em; font-size: .82em; color: #a1a8b5; }
+    .m-conn { display: inline-flex; align-items: center; gap: .45em; padding: .2em .7em; border-radius: 99px; font-weight: 600; }
+    .m-conn::before { content: ""; width: .55em; height: .55em; border-radius: 50%; background: currentColor; }
+    .m-conn.ok { color: #4ade80; background: rgba(74, 222, 128, .12); }
+    .m-conn.err { color: #f87171; background: rgba(248, 113, 113, .12); }
+    .m-id { font-family: ui-monospace, Consolas, monospace; color: #d1d5db; }
+    .m-now { display: flex; align-items: center; gap: .6em; padding: .7em .9em; border-radius: .8em; background: rgba(255,255,255,.06);
+      font-size: .9em; color: #d1d5db; min-width: 0; }
+    .m-now svg { flex: none; width: 1.1em; height: 1.1em; opacity: .7; }
+    .m-now-body { flex: 1; min-width: 0; display: grid; gap: .5em; }
+    .m-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .m-progress { display: flex; align-items: center; gap: .8em; }
+    .m-progress[hidden] { display: none; }
+    .m-bar { flex: 1; height: .4em; border-radius: 99px; background: rgba(255,255,255,.14); overflow: hidden; }
+    .m-bar > div { height: 100%; width: 0; border-radius: 99px; background: #3b82f6; transition: width .25s linear; }
+    .m-time { font-size: .9em; font-variant-numeric: tabular-nums; color: #e5e7eb; white-space: nowrap; }
+    .m-actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(8em, 1fr)); gap: .7em; }
+    .m-actions a[hidden], .m-actions button[hidden] { display: none; }
+    .m-actions a { text-decoration: none; }
+    .m-actions button, .m-actions a { display: flex; align-items: center; justify-content: center; gap: .6em; min-height: 3.3em; padding: .6em 1em;
+      font: inherit; font-weight: 600; color: #fff; border-radius: .9em; cursor: pointer; transition: background .15s, transform .1s;
+      background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.14); }
+    .m-actions button:hover, .m-actions a:hover { background: rgba(255,255,255,.15); }
+    .m-actions button:active, .m-actions a:active { transform: scale(.97); }
+    .m-actions button.primary { background: #2563eb; border-color: #3b82f6; }
+    .m-actions button.primary:hover { background: #1d4ed8; }
+    .m-actions svg { width: 1.25em; height: 1.25em; flex: none; display: block; }
+    .m-close { position: absolute; top: 1em; right: 1em; width: 2.4em; height: 2.4em; display: grid; place-items: center; padding: 0;
+      border-radius: 50%; border: 1px solid rgba(255,255,255,.14); background: rgba(255,255,255,.08); color: #e5e7eb; cursor: pointer; }
+    .m-close:hover { background: rgba(255,255,255,.18); }
+    .m-close svg { width: 1.1em; height: 1.1em; }
+    /* Vollbild-Button: Symbol und Text je nach Zustand */
+    .m-fs-off { display: none; }
+    .is-fs .m-fs-on { display: none; }
+    .is-fs .m-fs-off { display: contents; }
+    /* Anhalten/Fortsetzen: nur im Modus Play oder wenn am Screen selbst angehalten */
+    .m-pause-off, .m-actions .m-pause-btn { display: none; }
+    .can-pause .m-actions .m-pause-btn { display: flex; }
+    .is-paused .m-pause-on { display: none; }
+    .is-paused .m-pause-off { display: contents; }
+    .m-paused { display: none; align-items: center; gap: .5em; padding: .6em .9em; border-radius: .8em; font-size: .9em; font-weight: 600;
+      color: #fbbf24; background: rgba(251, 191, 36, .12); }
+    .is-paused .m-paused { display: flex; }
+    .m-quality { display: flex; align-items: center; gap: .8em; font-size: .9em; color: #d1d5db; }
+    .m-quality span { flex: none; }
+    .m-quality select { flex: 1; min-width: 0; font: inherit; color: #fff; background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.14);
+      border-radius: .6em; padding: .45em .7em; }
+    .m-quality select option { color: #111; }
+    /* Bildqualität und Sprache gemeinsam als Fußzeile des Menüs */
+    .m-prefs { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr); gap: .8em; padding-top: .9em;
+      border-top: 1px solid rgba(255,255,255,.1); font-size: .9em; }
+    .m-prefs .m-quality { color: #a1a8b5; gap: .6em; }
+    .m-lang svg { width: 1.2em; height: 1.2em; flex: none; opacity: .8; }
+    .m-paused svg { width: 1.1em; height: 1.1em; flex: none; }
+    /* Gerät verbinden: QR-Code mit der Adresse dieses ScreenDeck */
+    .m-qr { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 1em; align-items: center; padding: .9em; border-radius: .9em; background: rgba(255,255,255,.06); }
+    .m-qr[hidden] { display: none; }
+    .m-qr img { width: 11em; height: 11em; padding: .5em; background: #fff; border-radius: .6em; image-rendering: pixelated; }
+    .m-qr b { display: block; margin-bottom: .3em; }
+    .m-qr p { margin: 0 0 .5em; font-size: .9em; color: #d1d5db; }
+    .m-qr code { font-size: .95em; color: #93c5fd; word-break: break-all; }
+    /* Fernsteuerung: Auswahl im Menü und Leiste am steuernden Gerät */
+    .m-remote { display: grid; gap: .7em; padding: .9em; border-radius: .9em; background: rgba(255,255,255,.06); }
+    .m-remote[hidden] { display: none; }
+    .m-remote-title { font-size: .9em; color: #d1d5db; }
+    .m-chips { display: flex; flex-wrap: wrap; gap: .5em; }
+    .m-chip { font: inherit; font-size: .9em; padding: .45em .9em; border-radius: 99px; cursor: pointer; color: #e5e7eb;
+      background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.18); }
+    .m-chip.on { color: #fff; background: #2563eb; border-color: #3b82f6; }
+    .m-chip.off { opacity: .55; }
+    .m-remote-actions { display: flex; gap: .6em; justify-content: flex-end; }
+    .m-remote-actions button { font: inherit; font-weight: 600; padding: .55em 1.1em; border-radius: .8em; cursor: pointer; color: #fff;
+      background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.14); }
+    .m-remote-actions button.primary { background: #2563eb; border-color: #3b82f6; }
+    .m-remote-actions button:disabled { opacity: .45; cursor: default; }
+    .m-remote-note { font-size: .85em; color: #9ca3af; }
+    #remoteBar { position: fixed; left: 50%; bottom: max(12px, env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 15;
+      display: flex; align-items: center; gap: 8px; padding: 8px; border-radius: 18px; font-size: 15px; color: #f3f4f6;
+      background: rgba(22, 24, 30, .82); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
+      border: 1px solid rgba(255,255,255,.14); box-shadow: 0 8px 24px rgba(0,0,0,.4); cursor: default; max-width: calc(100vw - 24px); }
+    #remoteBar[hidden] { display: none; }
+    #remoteBar button { width: 52px; height: 52px; display: grid; place-items: center; padding: 0; border-radius: 14px; cursor: pointer; color: #fff;
+      background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.14); }
+    #remoteBar button:active { transform: scale(.95); }
+    #remoteBar button.primary { background: #2563eb; border-color: #3b82f6; }
+    #remoteBar button[hidden] { display: none; }
+    #remoteBar svg { width: 24px; height: 24px; }
+    #remoteBar .rb-info { display: grid; min-width: 0; padding: 0 6px; line-height: 1.25; }
+    #remoteBar .rb-info b { font-size: 12px; font-weight: 600; color: #93c5fd; white-space: nowrap; }
+    #remoteBar .rb-info span { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 34vw; }
+    body.remote-ctrl { cursor: default; }
+    #remoteBar .rb-sep { width: 1px; align-self: stretch; margin: 6px 0; background: rgba(255,255,255,.15); }
+    #remoteBar button.on { background: #f59e0b; border-color: #fbbf24; color: #111; }
+    @media (max-width: 560px) {
+      #remoteBar { gap: 5px; padding: 6px; }
+      #remoteBar button { width: 42px; height: 42px; border-radius: 12px; }
+      #remoteBar .rb-info { display: none; }
+    }
+    /* Ton der gesteuerten Screens: Musik (mit Titelwahl) und Video-Ton */
+    #soundBar { position: fixed; left: 50%; bottom: calc(max(12px, env(safe-area-inset-bottom)) + 80px); transform: translateX(-50%); z-index: 15;
+      display: grid; gap: 10px; padding: 12px 14px; border-radius: 16px; font-size: 15px; width: min(440px, calc(100vw - 24px)); box-sizing: border-box;
+      background: rgba(22, 24, 30, .88); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
+      border: 1px solid rgba(255,255,255,.14); box-shadow: 0 8px 24px rgba(0,0,0,.4); color: #f3f4f6; }
+    #soundBar[hidden] { display: none; }
+    #soundBar .m-vol { grid-template-columns: auto minmax(4.5em, max-content) minmax(0, 1fr) 3em; }
+    .sb-track { display: flex; align-items: center; gap: 8px; min-width: 0; }
+    .sb-track[hidden] { display: none; }
+    .sb-track .m-mute { flex: none; }
+    .sb-track .m-mute.primary { background: #2563eb; border-color: #3b82f6; }
+    .sb-title { min-width: 0; flex: 1; font-size: 13px; color: #9ca3af; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .sb-title b { color: #e5e7eb; font-weight: 600; }
+    .sb-note { font-size: 12px; color: #9ca3af; }
+    .sb-head { font-size: 13px; color: #9ca3af; margin-bottom: -4px; }
+    #soundBar .sb-disabled { opacity: .4; pointer-events: none; }
+    .sb-beh { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 13.5px; color: #d1d5db;
+      padding-top: 10px; border-top: 1px solid rgba(255,255,255,.1); }
+    .sb-beh select { font: inherit; color: #fff; background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.14); border-radius: 10px; padding: 6px 8px; min-width: 0; }
+    .sb-beh select option { background: #1f2937; }
+    .sb-icon { width: 2.6em; height: 2.6em; display: grid; place-items: center; color: #9ca3af; }
+    .sb-icon svg { width: 1.25em; height: 1.25em; }
+    .sb-screens { font-size: 14px; max-height: 6.5em; overflow-y: auto; }
+    .sb-note[hidden] { display: none; }
+    /* Drehung (Fernsteuerung): Bild/Video im Uhrzeigersinn in Vierteldrehungen */
+    .layer > .rotated { flex: none; }
+    /* Stift: Werkzeugleiste über der Fernsteuerungs-Leiste, Striche liegen auf dem Bild (zoomen mit) */
+    #penBar { position: fixed; left: 50%; bottom: calc(max(12px, env(safe-area-inset-bottom)) + 80px); transform: translateX(-50%); z-index: 15;
+      display: flex; align-items: center; gap: 6px; padding: 7px 9px; border-radius: 16px;
+      background: rgba(22, 24, 30, .82); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
+      border: 1px solid rgba(255,255,255,.14); box-shadow: 0 8px 24px rgba(0,0,0,.4); max-width: calc(100vw - 24px); }
+    #penBar[hidden] { display: none; }
+    #penBar button { width: 38px; height: 38px; display: grid; place-items: center; padding: 0; border-radius: 50%; cursor: pointer; color: #fff;
+      background: transparent; border: 2px solid transparent; }
+    #penBar .pen-color i { width: 24px; height: 24px; border-radius: 50%; background: var(--c); box-shadow: inset 0 0 0 1px rgba(0,0,0,.35); }
+    #penBar .pen-size i { border-radius: 50%; background: #e5e7eb; }
+    #penBar button.on { border-color: #fff; background: rgba(255,255,255,.12); }
+    #penBar .pen-undo { border-radius: 12px; background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.14); }
+    #penBar .pen-undo:disabled { opacity: .35; }
+    #penBar svg { width: 22px; height: 22px; }
+    #penBar .pen-sep { width: 1px; align-self: stretch; margin: 4px 2px; background: rgba(255,255,255,.15); }
+    body.pen-on { cursor: crosshair; }
+    .layer > svg.ink { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
+
+    /* Ton: Video-Ton und Musik je mit Stumm-Schalter und Lautstärke */
+    .m-sound { display: grid; gap: .55em; }
+    .m-vol { display: grid; grid-template-columns: auto minmax(5.5em, max-content) minmax(0, 1fr) 3.4em; align-items: center; gap: .8em; font-size: .9em; color: #d1d5db; }
+    .m-vol[hidden] { display: none; }
+    .m-mute { width: 2.6em; height: 2.6em; display: grid; place-items: center; padding: 0; border-radius: .7em; cursor: pointer; color: #fff;
+      background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.14); transition: background .15s, transform .1s; }
+    .m-mute:hover { background: rgba(255,255,255,.15); }
+    .m-mute:active { transform: scale(.94); }
+    .m-mute svg { width: 1.25em; height: 1.25em; display: block; }
+    .m-mute .m-off, .m-vol.muted .m-mute .m-on { display: none; }
+    .m-vol.muted .m-mute .m-off { display: block; }
+    .m-vol.muted .m-mute { color: #f87171; background: rgba(248,113,113,.12); border-color: rgba(248,113,113,.35); }
+    .m-vol input { width: 100%; margin: 0; accent-color: #3b82f6; cursor: pointer; }
+    .m-vol.muted input, .m-vol.muted .m-vol-val { opacity: .4; }
+    .m-vol-val { text-align: right; font-variant-numeric: tabular-nums; color: #e5e7eb; }
   </style>
 </head>
 <body>
@@ -61,7 +236,123 @@
   <div id="cover"></div>
   <div id="ident"></div>
   <div id="status" title="Keine Verbindung zum Server"></div>
-  <div id="hint">Tippen für Vollbild</div>
+  <div id="hint">Tippen für Menü</div>
+  <div id="penBar" hidden></div>
+  <div id="soundBar" hidden>
+    <div class="sb-head">Ton steuern von:</div>
+    <div class="m-chips sb-screens"></div>
+    <div class="m-vol" data-kind="music">
+      <button class="m-mute" data-s="mute-music" title="Musik auf den gesteuerten Screens stumm/laut"><svg class="m-on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5 6 9H2v6h4l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M19 5a10 10 0 0 1 0 14"/></svg><svg class="m-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5 6 9H2v6h4l5 4z"/><path d="m22 9-6 6M16 9l6 6"/></svg></button>
+      <span>Musik</span>
+      <input type="range" min="0" max="100" step="5" data-s="vol-music" aria-label="Lautstärke Musik">
+      <span class="m-vol-val"></span>
+    </div>
+    <div class="sb-track">
+      <button class="m-mute" data-s="prev" title="Vorheriger Titel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 20 9 12l10-8zM5 19V5"/></svg></button>
+      <button class="m-mute primary" data-s="play" title="Musik abspielen/anhalten (alle Screens)"><svg class="sb-play" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 4l14 8-14 8z"/></svg><svg class="sb-pause" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></svg></button>
+      <button class="m-mute" data-s="next" title="Nächster Titel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 4 10 8-10 8zM19 5v14"/></svg></button>
+      <span class="sb-title" translate="no"></span>
+    </div>
+    <div class="m-vol" data-kind="video">
+      <button class="m-mute" data-s="mute-video" title="Video-Ton auf den gesteuerten Screens an/aus"><svg class="m-on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5 6 9H2v6h4l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M19 5a10 10 0 0 1 0 14"/></svg><svg class="m-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5 6 9H2v6h4l5 4z"/><path d="m22 9-6 6M16 9l6 6"/></svg></button>
+      <span>Video-Ton</span>
+      <input type="range" min="0" max="100" step="5" data-s="vol-video" aria-label="Lautstärke Video-Ton">
+      <span class="m-vol-val"></span>
+    </div>
+    <div class="sb-beh">
+      <span>Bei Video mit Ton</span>
+      <select data-s="behavior" aria-label="Musik bei Video mit Ton">
+        <option value="duck">leiser weiterspielen</option>
+        <option value="pause">pausieren</option>
+        <option value="none">nichts ändern</option>
+      </select>
+    </div>
+    <div class="m-vol" data-kind="duck" title="Lautstärke der Musik, solange ein Video mit Ton läuft">
+      <span class="sb-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5 6 9H2v6h4l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/></svg></span>
+      <span>Musik dabei</span>
+      <input type="range" min="0" max="100" step="5" data-s="duck" aria-label="Musik während Video mit Ton">
+      <span class="m-vol-val"></span>
+    </div>
+    <div class="sb-note">Lautstärke und Stumm gelten für den gewählten Screen. Titelwahl, Abspielen und das Verhalten bei Videos betreffen die Musik aller Screens.</div>
+  </div>
+  <div id="remoteBar" hidden>
+    <button data-r="stop" title="Fernsteuerung beenden"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+    <span class="rb-sep"></span>
+    <button data-r="prev" title="Vorheriger Eintrag"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg></button>
+    <div class="rb-info"><b>Fernsteuerung</b><span class="rb-targets"></span></div>
+    <button data-r="next" class="primary" title="Nächster Eintrag"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"/></svg></button>
+    <button data-r="unzoom" title="Zoom zurücksetzen" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M8 11h6M21 21l-4.3-4.3"/></svg></button>
+    <button data-r="rotate" title="Bild drehen (90° im Uhrzeigersinn)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36L21 8"/><path d="M21 3v5h-5"/></svg></button>
+    <button data-r="pen" title="Stift: auf dem Bild zeichnen"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg></button>
+    <button data-r="sound" title="Ton der gesteuerten Screens"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5 6 9H2v6h4l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M19 5a10 10 0 0 1 0 14"/></svg></button>
+  </div>
+  <div id="menu" hidden>
+    <div class="m-panel" role="dialog" aria-label="Screen-Menü">
+      <button class="m-close" data-m="close" title="Ausblenden" aria-label="Ausblenden"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+      <div class="m-head">
+        <img class="m-logo" src="/logo.svg" alt="">
+        <div>
+          <div class="m-name"></div>
+          <div class="m-meta"><span class="m-conn"></span><span>ID <span class="m-id"></span></span></div>
+        </div>
+      </div>
+      <div class="m-now"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="4" width="20" height="14" rx="2"/><path d="M8 21h8M12 18v3"/></svg><div class="m-now-body"><span class="m-title"></span><div class="m-progress" hidden><div class="m-bar"><div></div></div><span class="m-time"></span></div></div></div>
+      <div class="m-sound">
+        <div class="m-vol" data-kind="video">
+          <button class="m-mute" data-m="mute-video"><svg class="m-on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5 6 9H2v6h4l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M19 5a10 10 0 0 1 0 14"/></svg><svg class="m-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5 6 9H2v6h4l5 4z"/><path d="m22 9-6 6M16 9l6 6"/></svg></button>
+          <span>Video-Ton</span>
+          <input type="range" min="0" max="100" step="5" data-m="vol-video" aria-label="Lautstärke Video-Ton">
+          <span class="m-vol-val"></span>
+        </div>
+        <div class="m-vol" data-kind="music">
+          <button class="m-mute" data-m="mute-music"><svg class="m-on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5 6 9H2v6h4l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M19 5a10 10 0 0 1 0 14"/></svg><svg class="m-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5 6 9H2v6h4l5 4z"/><path d="m22 9-6 6M16 9l6 6"/></svg></button>
+          <span>Musik</span>
+          <input type="range" min="0" max="100" step="5" data-m="vol-music" aria-label="Lautstärke Musik">
+          <span class="m-vol-val"></span>
+        </div>
+      </div>
+      <div class="m-paused"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></svg>Am Screen angehalten – die Verwaltung sieht das und kann fortsetzen</div>
+      <div class="m-qr" hidden>
+        <img alt="">
+        <div><b>Weiteres Gerät verbinden</b><p>Mit der Kamera des Smartphones oder Tablets scannen, oder die Adresse eintippen:</p><code class="m-qr-url"></code></div>
+      </div>
+      <div class="m-remote" hidden>
+        <div class="m-remote-title">Fernsteuerung: Welche Screens sollen mitlaufen?</div>
+        <div class="m-chips"></div>
+        <div class="m-remote-note"></div>
+        <div class="m-remote-actions">
+          <button data-m="remote-stop" hidden>Beenden</button>
+          <button class="primary" data-m="remote-start">Starten</button>
+        </div>
+      </div>
+      <div class="m-actions">
+        <button class="primary" data-m="fullscreen">
+          <span class="m-fs-on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3"/></svg></span>
+          <span class="m-fs-off"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3v3a2 2 0 0 1-2 2H3M21 8h-3a2 2 0 0 1-2-2V3M3 16h3a2 2 0 0 1 2 2v3M16 21v-3a2 2 0 0 1 2-2h3"/></svg></span>
+          <span class="m-fs-on">Vollbild</span><span class="m-fs-off">Vollbild beenden</span>
+        </button>
+        <button class="m-pause-btn" data-m="pause">
+          <span class="m-pause-on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></svg></span>
+          <span class="m-pause-off"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 4l14 8-14 8z"/></svg></span>
+          <span class="m-pause-on">Anhalten</span><span class="m-pause-off">Fortsetzen</span>
+        </button>
+        <a class="m-download" data-m="download" download hidden title="Aktuelles Bild/Video auf diesem Gerät speichern"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5"/><path d="M5 21h14"/></svg><span>Herunterladen</span></a>
+        <button data-m="qr" title="QR-Code zum Öffnen auf einem weiteren Gerät"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3h-3zM20 14v.01M14 20h.01M17 20h4v-3"/></svg><span>Gerät verbinden</span></button>
+        <button data-m="remote" hidden title="Andere Screens von diesem Gerät aus steuern"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="7" y="2" width="10" height="20" rx="2"/><path d="M11 18h2"/></svg><span>Fernsteuerung</span></button>
+        <button data-m="reload"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36L21 8"/><path d="M21 3v5h-5"/></svg><span>Neu laden</span></button>
+      </div>
+      <div class="m-prefs">
+        <label class="m-quality" title="Bildqualität, in der dieser Screen Bilder bekommt">
+          <span>Bildqualität</span>
+          <select data-m="quality"></select>
+        </label>
+        <label class="m-quality m-lang" translate="no" title="Sprache / Language">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg>
+          <select data-lang-select aria-label="Sprache / Language"><option value="de">Deutsch</option><option value="en">English</option></select>
+        </label>
+      </div>
+    </div>
+  </div>
 
   <script src="/fonts.js?v={{VERSION}}"></script>
   <script>
@@ -92,7 +383,8 @@
 
     // audio: on | off | blocked (nur bei Videos, sonst null)
     // mode: tatsächlich angewendeter Modus (play | pause | image | dark)
-    const status = { itemId: null, updatedAt: null, state: 'loading', detail: null, audio: null, mode: 'play' };
+    // hasAudio: hat das Video überhaupt eine Tonspur? (null = noch unbekannt)
+    const status = { itemId: null, updatedAt: null, state: 'loading', detail: null, audio: null, hasAudio: null, mode: 'play' };
     let lastSent = '';
 
     function report(patch, always = false) {
@@ -135,6 +427,32 @@
       }
     }
 
+    // Tonspur vorhanden? Chrome zählt dekodierte Tondaten (auch stumm geschaltet), andere Browser kennen audioTracks/mozHasAudio
+    function detectAudioTrack(v, key) {
+      const check = (last) => {
+        if (key !== currentKey) return;
+        let has = v.audioTracks ? v.audioTracks.length > 0 : v.mozHasAudio;
+        if (has === undefined && v.webkitAudioDecodedByteCount !== undefined) {
+          // Ton wird vor dem Bild dekodiert: nach einer knappen Sekunde Wiedergabe ohne Tondaten gibt es keine Tonspur
+          has = v.webkitAudioDecodedByteCount > 0 ? true : v.currentTime > 0.7 ? false : undefined;
+        }
+        if (has !== undefined) report({ hasAudio: has });
+        else if (!last) setTimeout(() => check(true), 1500);
+      };
+      setTimeout(() => check(false), 1000);
+    }
+
+    // Ton-Einstellung sofort auf das laufende Video anwenden (auch im Sync-Modus)
+    function applyVideoAudio() {
+      const v = visibleVideo();
+      if (v && !v.paused) return startVideo(v);
+      if (v) {
+        v.volume = audio.volume / 100;
+        v.muted = !audio.enabled;
+      }
+      restartVisibleVideo();
+    }
+
     function visibleVideo() {
       const layer = layers[front];
       return layer.dataset.key === currentKey ? layer.querySelector('video') : null;
@@ -143,8 +461,166 @@
     async function restartVisibleVideo() {
       const v = visibleVideo();
       if (mode !== 'play' || !v || status.state === 'error') return;
+      if (syncInfo) return syncVideo(v); // Sync-Modus: an der gemeinsamen Position einsteigen
       if (await startVideo(v)) report({ state: 'playing', detail: null }); // startVideo prüft, ob noch aktuell
     }
+
+    // -----------------------------------------------------------------------
+    // Sync-Modus: alle Screens spielen denselben Inhalt ab einer gemeinsamen
+    // Startzeit (Serverzeit). Die Uhr des Geräts wird mit der des Servers
+    // abgeglichen, die Abspielposition laufend nachgeführt.
+    // -----------------------------------------------------------------------
+
+    let syncInfo = null; // { start } in Serverzeit (ms) oder null
+    let syncWaiting = false; // Video wartet auf den gemeinsamen Start
+    let syncTimer = null;
+    const offsets = []; // letzte Messungen Serverzeit - Gerätezeit
+
+    // Größter Wert der letzten Messungen = Messung mit der kürzesten Laufzeit im Netz
+    function noteServerTime(t) {
+      if (!t) return;
+      offsets.push(t - Date.now());
+      if (offsets.length > 10) offsets.shift();
+    }
+    const serverNow = () => Date.now() + (offsets.length ? Math.max(...offsets) : 0);
+    const syncPos = () => (serverNow() - syncInfo.start) / 1000; // Sollposition in Sekunden, negativ = noch nicht gestartet
+
+    async function syncVideo(v) {
+      clearTimeout(syncTimer);
+      syncWaiting = false;
+      if (!syncInfo || mode !== 'play') return;
+      const key = currentKey;
+      const pos = syncPos();
+      if (pos < 0) {
+        // Bis zum gemeinsamen Start am Anfang warten
+        syncWaiting = true;
+        v.pause();
+        v.currentTime = 0;
+        syncTimer = setTimeout(() => key === currentKey && syncVideo(v), -pos * 1000);
+        return;
+      }
+      if (isFinite(v.duration) && pos >= v.duration) return; // Runde ist schon vorbei, die Gruppe schaltet gleich weiter
+      if (Math.abs(v.currentTime - pos) > 0.3) v.currentTime = pos;
+      if (v.paused) {
+        const ok = await startVideo(v);
+        if (key === currentKey) report(ok ? { state: 'playing', detail: null } : { state: 'blocked', detail: 'Autoplay blockiert' });
+      }
+    }
+
+    function applySync() {
+      const v = visibleVideo();
+      if (v) syncVideo(v);
+      else if (textTimer && syncInfo) {
+        textTimer.elapsed = syncPos();
+        textTimer.done = false;
+      }
+    }
+
+    // Feinabgleich: kleine Abweichungen über die Abspielgeschwindigkeit, große per Sprung
+    setInterval(() => {
+      const v = visibleVideo();
+      if (!v) return;
+      if (!syncInfo || mode !== 'play' || v.paused || syncWaiting || !isFinite(v.duration)) {
+        v.playbackRate = 1;
+        return;
+      }
+      const pos = syncPos();
+      if (pos < 0 || pos >= v.duration - 0.2) return;
+      const diff = v.currentTime - pos; // > 0 = Screen ist voraus
+      if (Math.abs(diff) > 0.5) {
+        v.currentTime = pos;
+        v.playbackRate = 1;
+      } else if (Math.abs(diff) > 0.04) v.playbackRate = Math.min(1.1, Math.max(0.9, 1 - diff));
+      else v.playbackRate = 1;
+    }, 500);
+
+    // -----------------------------------------------------------------------
+    // Musik: unsichtbarer Audio-Player, synchron zu den anderen Screens (gemeinsame
+    // Startzeit in Serverzeit). Radio läuft live. Während eines Videos mit Ton ggf. leiser.
+    // -----------------------------------------------------------------------
+
+    const musicPlayer = new Audio();
+    musicPlayer.preload = 'auto';
+    let musicState = null; // letzte Meldung „music“ vom Server
+    let musicWait = null;
+    let musicReported = '';
+
+    function reportMusic(state) {
+      const json = JSON.stringify({ state, trackId: musicState?.track?.id ?? null, duration: isFinite(musicPlayer.duration) ? musicPlayer.duration : 0 });
+      if (json === musicReported) return;
+      musicReported = json;
+      send({ type: 'musicStatus', ...JSON.parse(json) });
+    }
+
+    async function applyMusic() {
+      clearTimeout(musicWait);
+      const m = musicState;
+      const active = m && m.enabled && m.playing && m.track;
+      if (!active) {
+        if (!musicPlayer.paused) musicPlayer.pause();
+        if (!m?.track || !m.enabled) {
+          musicPlayer.removeAttribute('src');
+          delete musicPlayer.dataset.track;
+        }
+        return reportMusic(m?.enabled ? 'paused' : 'off');
+      }
+      if (musicPlayer.dataset.track !== m.track.id) {
+        musicPlayer.dataset.track = m.track.id;
+        musicPlayer.src = m.track.src;
+      }
+      applyMusicVolume();
+      if (m.track.kind === 'file') {
+        const pos = (serverNow() - m.startedAt) / 1000;
+        if (pos < 0) {
+          // gemeinsamer Start: bis dahin am Anfang warten
+          musicPlayer.pause();
+          if (musicPlayer.currentTime > 0.1) musicPlayer.currentTime = 0;
+          musicWait = setTimeout(applyMusic, -pos * 1000);
+          return;
+        }
+        if (isFinite(musicPlayer.duration) && pos >= musicPlayer.duration) return; // Runde vorbei, Server schaltet weiter
+        if (Math.abs(musicPlayer.currentTime - pos) > 0.5) musicPlayer.currentTime = pos;
+      }
+      if (musicPlayer.paused) {
+        try {
+          await musicPlayer.play();
+          reportMusic('playing');
+        } catch {
+          reportMusic('blocked'); // Browser erlaubt Ton erst nach einmal Tippen
+        }
+      } else reportMusic('playing');
+    }
+
+    // Gesamtlautstärke × ggf. leiser wegen Video × eigene Lautstärke dieses Screens
+    function applyMusicVolume() {
+      const m = musicState;
+      if (!m) return;
+      musicPlayer.volume = (m.volume / 100) * (m.duck != null ? m.duck / 100 : 1) * ((m.screenVolume ?? 100) / 100);
+      musicPlayer.muted = !!m.muted;
+    }
+
+    musicPlayer.addEventListener('loadedmetadata', () => reportMusic(musicPlayer.paused ? 'loading' : 'playing'));
+    musicPlayer.addEventListener('error', () => musicState?.track && reportMusic('error'));
+    musicPlayer.addEventListener('ended', () => {
+      if (musicState?.track) send({ type: 'musicEnded', trackId: musicState.track.id, startedAt: musicState.startedAt });
+    });
+
+    // Feinabgleich der Position (nur Dateien; Radio ist live)
+    setInterval(() => {
+      const m = musicState;
+      if (!m?.enabled || !m.playing || m.track?.kind !== 'file' || musicPlayer.paused || !isFinite(musicPlayer.duration)) {
+        musicPlayer.playbackRate = 1;
+        return;
+      }
+      const pos = (serverNow() - m.startedAt) / 1000;
+      if (pos < 0 || pos >= musicPlayer.duration - 0.3) return;
+      const diff = musicPlayer.currentTime - pos;
+      if (Math.abs(diff) > 0.8) {
+        musicPlayer.currentTime = pos;
+        musicPlayer.playbackRate = 1;
+      } else if (Math.abs(diff) > 0.05) musicPlayer.playbackRate = Math.min(1.08, Math.max(0.92, 1 - diff));
+      else musicPlayer.playbackRate = 1;
+    }, 1000);
 
     // -----------------------------------------------------------------------
     // Modus: play = normal, pause = eingefroren, image = Standbild, dark = schwarz.
@@ -152,6 +628,7 @@
     // -----------------------------------------------------------------------
 
     let mode = 'play';
+    let modeBy = null; // 'screen' = am Screen selbst angehalten
     let standby = null; // Bildadresse
     let standbyStyle = null; // { text, font, color, position, edge }
 
@@ -224,8 +701,10 @@
         case 'video': {
           const el = document.createElement('video');
           // Keine Schleife: am Ende entscheidet der Server, was als Nächstes läuft
-          Object.assign(el, { src: item.src, autoplay: true, muted: true, playsInline: true });
+          // Im Sync-Modus nicht selbst starten, sondern zum gemeinsamen Zeitpunkt
+          Object.assign(el, { src: item.src, autoplay: !syncInfo, muted: true, playsInline: true });
           el.setAttribute('playsinline', '');
+          el.addEventListener('playing', () => detectAudioTrack(el, currentKey), { once: true });
           return el;
         }
         case 'url': {
@@ -250,6 +729,20 @@
         }
       }
       return document.createElement('div');
+    }
+
+    // Nächstes Bild vorab laden und dekodieren, damit der Wechsel ohne Ladezeit klappt
+    const preloaded = new Map(); // src -> Image (Verweis hält es im Speicher)
+    function preload(list) {
+      for (const src of list ?? []) {
+        if (preloaded.has(src)) continue;
+        const img = new Image();
+        img.decoding = 'async';
+        img.src = src;
+        img.decode?.().catch(() => {});
+        preloaded.set(src, img);
+      }
+      while (preloaded.size > 3) preloaded.delete(preloaded.keys().next().value);
     }
 
     const MEDIA_ERRORS = { 1: 'abgebrochen', 2: 'Netzwerkfehler', 3: 'Dekodierfehler', 4: 'Format nicht unterstützt' };
@@ -277,10 +770,12 @@
       const key = item ? item.id + ':' + item.updatedAt : 'none:' + screenName;
       if (key === currentKey && !force) return;
       currentKey = key;
+      currentTitle = item?.title ?? '';
+      currentItem = item ?? null;
       const my = ++token;
       const isCurrent = () => my === token;
       textTimer = null;
-      report({ itemId: item?.id ?? null, updatedAt: item?.updatedAt ?? null, state: 'loading', detail: null, audio: null });
+      report({ itemId: item?.id ?? null, updatedAt: item?.updatedAt ?? null, state: 'loading', detail: null, audio: null, hasAudio: null });
 
       const back = layers[1 - front];
       back.replaceChildren();
@@ -294,7 +789,20 @@
       const old = layers[front];
       old.classList.remove('visible');
       front = 1 - front;
-      setTimeout(() => { if (isCurrent()) old.replaceChildren(); }, 1000);
+      resetZoom(); // neuer Inhalt beginnt unvergrößert, der alte blendet vergrößert aus
+      rot = 0; // und ungedreht
+      remoteBar.querySelector('[data-r=rotate]').classList.remove('on');
+      remoteBar.querySelector('[data-r=rotate]').hidden = !rotatable();
+      if (strokes.length) {
+        strokes = [];
+        drawing = null;
+        layers[front].querySelector(':scope > svg.ink')?.remove();
+        updatePenBar();
+      }
+      setTimeout(() => {
+        old.style.transform = '';
+        if (isCurrent()) old.replaceChildren();
+      }, 1000);
 
       if (!item) return report({ state: 'idle' });
       if (result.error) return report({ state: 'error', detail: result.error });
@@ -308,6 +816,7 @@
           send({ type: 'ended', itemId: item.id });
         };
         if (mode !== 'play') return report({ state: 'paused', detail: null }); // nicht automatisch starten
+        if (syncInfo) return syncVideo(el);
         const started = await startVideo(el);
         if (isCurrent()) {
           report(started ? { state: 'playing', detail: null } : { state: 'blocked', detail: 'Autoplay blockiert' });
@@ -320,7 +829,9 @@
       } else {
         report({ state: 'showing', detail: null });
         if (item.type === 'text' && item.duration > 0) {
-          textTimer = { itemId: item.id, duration: item.duration, elapsed: 0, done: false, cd: el.querySelector('.cd') };
+          // Sync-Modus: Restzeit ab dem gemeinsamen Start (vor dem Start negativ)
+          const elapsed = syncInfo ? syncPos() : 0;
+          textTimer = { itemId: item.id, duration: item.duration, elapsed, done: false, cd: el.querySelector('.cd') };
         }
       }
     }
@@ -344,7 +855,7 @@
       const t = textTimer;
       if (!t || t.done || mode !== 'play') return;
       t.elapsed = Math.min(t.duration, t.elapsed + dt);
-      if (t.cd) t.cd.textContent = fmtCountdown(t.duration - t.elapsed);
+      if (t.cd) t.cd.textContent = fmtCountdown(t.duration - Math.max(0, t.elapsed));
       if (t.elapsed < t.duration) return;
       t.done = true;
       if (ws?.readyState !== WebSocket.OPEN) { t.elapsed = 0; t.done = false; return; } // offline: von vorne
@@ -373,7 +884,7 @@
     setInterval(() => {
       const layer = layers[front];
       const v = layer.querySelector('video');
-      if (!v || v.ended || mode !== 'play' || layer.dataset.key !== currentKey || status.state === 'error' || status.state === 'loading') return;
+      if (!v || v.ended || syncWaiting || mode !== 'play' || layer.dataset.key !== currentKey || status.state === 'error' || status.state === 'loading') return;
       if (v.paused) {
         const key = currentKey;
         startVideo(v).then((ok) => {
@@ -426,6 +937,7 @@
       ws.onopen = () => {
         statusDot.classList.remove('on');
         report({}, true); // aktuellen Stand nach (Wieder-)Verbindung melden
+        if (!menu.hidden) updateMenu();
       };
       ws.onmessage = (e) => {
         const msg = JSON.parse(e.data);
@@ -434,12 +946,59 @@
           document.title = msg.name + ' – ScreenDeck';
           if (msg.audio) audio = msg.audio;
           mode = msg.mode ?? 'play';
+          modeBy = msg.modeBy ?? null;
           standby = msg.standby;
           standbyStyle = msg.standbyStyle;
+          noteServerTime(msg.serverTime);
+          syncInfo = msg.sync ?? null;
+          setMenuEnabled(msg.menu);
+          setTouchZoom(msg.touchZoom);
+          remoteAllowed = !!msg.remoteAllowed;
+          setRemote(msg.remote);
+          quality = msg.quality ?? quality;
+          if (!menu.hidden) updateMenu();
+          preload(msg.preload);
           applyMode();
           show(msg.item, msg.force);
+          applySync(); // gleicher Inhalt wie bisher: nur an die (neue) gemeinsame Position anpassen
+        } else if (msg.type === 'music') {
+          noteServerTime(msg.serverTime);
+          musicState = msg;
+          applyMusic();
+          if (!menu.hidden) updateSoundMenu();
+        } else if (msg.type === 'remoteList') {
+          // Vorauswahl: bisherige Ziele, sonst alle verbundenen Screens
+          const any = msg.screens.some((x) => x.selected);
+          remoteChoice = msg.screens.map((x) => ({ ...x, on: any ? x.selected : x.online }));
+          updateRemoteBox();
+        } else if (msg.type === 'zoom') {
+          applyRemoteZoom(msg);
+        } else if (msg.type === 'draw') {
+          applyRemoteDraw(msg);
+        } else if (msg.type === 'rotate') {
+          if (remote?.role === 'target' && msg.itemId === currentItem?.id) setRotation(msg.r);
+        } else if (msg.type === 'remoteSound') {
+          remoteSoundState = msg;
+          updateSoundBar();
+        } else if (msg.type === 'due') {
+          noteServerTime(msg.serverTime);
+          due = msg.dueAt ? { dueAt: msg.dueAt, duration: msg.duration } : null;
+        } else if (msg.type === 'menu') {
+          setMenuEnabled(msg.enabled);
+          setTouchZoom(msg.touchZoom);
+        } else if (msg.type === 'auth') {
+          // Screen-PIN wurde gesetzt: dieser bereits verbundene Screen bleibt angemeldet
+          document.cookie = `${msg.cookie}=${encodeURIComponent(msg.token)}; max-age=${msg.maxAge}; path=/; samesite=lax`;
+        } else if (msg.type === 'sync') {
+          noteServerTime(msg.serverTime);
+          syncInfo = msg.sync ?? null;
+          applySync();
         } else if (msg.type === 'mode') {
           mode = msg.mode;
+          if (mode !== 'pause') zoomHeld = false; // Verwaltung hat fortgesetzt bzw. umgeschaltet: nicht erneut fortsetzen
+          if (mode === 'image' || mode === 'dark') resetZoom();
+          modeBy = msg.modeBy ?? null;
+          if (!menu.hidden) updateMenu();
           standby = msg.standby;
           standbyStyle = msg.standbyStyle;
           applyMode();
@@ -448,7 +1007,8 @@
           if (msg.version !== PAGE_VERSION && !PAGE_VERSION.startsWith('{{')) location.reload();
         } else if (msg.type === 'audio') {
           audio = { enabled: msg.enabled, volume: msg.volume };
-          restartVisibleVideo();
+          applyVideoAudio();
+          if (!menu.hidden) updateSoundMenu();
         } else if (msg.type === 'replay') {
           const v = visibleVideo();
           if (v) { v.currentTime = 0; restartVisibleVideo(); }
@@ -458,21 +1018,810 @@
         else if (msg.type === 'reload') location.reload();
         else if (msg.type === 'removed') { screenName = 'Entfernt'; show(null, true); }
       };
-      ws.onclose = () => {
+      ws.onclose = (e) => {
+        if (e.code === 4001) return location.reload(); // PIN erforderlich: Seite leitet zur Anmeldung weiter
         statusDot.classList.add('on');
+        if (!menu.hidden) updateMenu();
         setTimeout(connect, 2000);
       };
     }
 
-    // Tippen/Klicken: Vollbild (nur nach Nutzeraktion erlaubt), Ton freischalten, blockiertes Video starten
+    // -----------------------------------------------------------------------
+    // Menü: Antippen zeigt Name/ID und Buttons (Vollbild an/aus, Anhalten, Herunterladen, Neu laden).
+    // ✕, erneutes Antippen oder Esc blendet es sofort aus, sonst nach 10 s von selbst.
+    // In der Verwaltung abschaltbar – dann schaltet Antippen wie früher direkt in den Vollbildmodus.
+    // -----------------------------------------------------------------------
+
     const hint = document.getElementById('hint');
+    const menu = document.getElementById('menu');
+    let menuEnabled = true;
+    let menuTimer = null;
+    let currentTitle = '';
+    let currentItem = null;
+    let quality = null; // { value, effective, defaultLabel, options } vom Server
+
+    /** Dateiname für den Download: Titel + Endung der Datei */
+    function downloadName(item) {
+      const ext = (decodeURIComponent((item.originalSrc ?? item.src).split('?')[0]).match(/\.[a-z0-9]{2,5}$/i) ?? [''])[0];
+      return (item.title || 'download').replace(/[\\/:*?"<>|]+/g, '_').trim() + ext;
+    }
     setTimeout(() => (hint.style.opacity = 0), 6000);
-    document.addEventListener('click', () => {
-      hint.style.opacity = 0;
+
+    const isFullscreen = () => !!(document.fullscreenElement || document.webkitFullscreenElement);
+    function toggleFullscreen() {
       const el = document.documentElement;
-      if (!document.fullscreenElement) (el.requestFullscreen || el.webkitRequestFullscreen)?.call(el)?.catch?.(() => {});
-      restartVisibleVideo();
+      if (isFullscreen()) (document.exitFullscreen || document.webkitExitFullscreen)?.call(document)?.catch?.(() => {});
+      else (el.requestFullscreen || el.webkitRequestFullscreen)?.call(el)?.catch?.(() => {});
+    }
+
+    function updateMenu() {
+      menu.querySelector('.m-name').textContent = screenName || 'Screen';
+      menu.querySelector('.m-id').textContent = screenId;
+      const conn = menu.querySelector('.m-conn');
+      const online = ws?.readyState === WebSocket.OPEN;
+      conn.textContent = online ? 'Verbunden' : 'Keine Verbindung';
+      conn.className = 'm-conn ' + (online ? 'ok' : 'err');
+      menu.querySelector('.m-title').textContent = currentTitle || 'Kein Inhalt';
+      updateMenuProgress();
+      menu.classList.toggle('is-fs', isFullscreen());
+      const qs = menu.querySelector('[data-m=quality]');
+      if (quality && document.activeElement !== qs) {
+        // „Standard (…)“ = Vorgabe vom Server; die übrigen Stufen gelten nur für diesen Screen
+        qs.innerHTML = [{ id: '', label: `Standard (${quality.defaultLabel})` }, ...quality.options]
+          .map((o) => `<option value="${o.id}">${o.label}</option>`)
+          .join('');
+        qs.value = quality.value;
+      }
+      const dl = menu.querySelector('[data-m=download]');
+      const downloadable = currentItem && (currentItem.type === 'image' || currentItem.type === 'video');
+      dl.hidden = !downloadable;
+      if (downloadable) {
+        dl.href = currentItem.originalSrc ?? currentItem.src; // Download immer in Originalqualität
+        dl.download = downloadName(currentItem);
+      }
+      // Fernsteuerung nur, wenn in der Verwaltung freigeschaltet (eine laufende lässt sich immer beenden)
+      menu.querySelector('[data-m=remote]').hidden = !remoteAllowed && remote?.role !== 'controller';
+      if (!remoteAllowed && remote?.role !== 'target') remoteBox.hidden = true;
+      updateSoundMenu();
+      updateRemoteBox();
+      const pausedHere = mode === 'pause' && modeBy === 'screen';
+      menu.classList.toggle('is-paused', pausedHere);
+      menu.classList.toggle('can-pause', mode === 'play' || pausedHere);
+    }
+
+    // Ton im Menü: Video-Ton (wie der Ton-Schalter in der Verwaltung) und Musik (nur wenn sie hier spielt)
+    function updateSoundMenu() {
+      setVolumeRow('video', !audio.enabled, audio.volume, true);
+      setVolumeRow('music', !!musicState?.muted, musicState?.screenVolume ?? 100, !!musicState?.enabled);
+    }
+    function setVolumeRow(kind, muted, volume, visible) {
+      const row = menu.querySelector(`.m-vol[data-kind=${kind}]`);
+      row.hidden = !visible;
+      row.classList.toggle('muted', muted);
+      const input = row.querySelector('input');
+      if (document.activeElement !== input) input.value = volume;
+      row.querySelector('.m-vol-val').textContent = input.value + ' %';
+      row.querySelector('.m-mute').title = muted ? 'Ton einschalten' : 'Stumm schalten';
+    }
+    // Änderungen sofort anwenden und dem Server melden (die Verwaltung zeigt sie an)
+    function setVideoAudio(patch) {
+      audio = { ...audio, ...patch };
+      applyVideoAudio();
+      send({ type: 'audio', ...patch });
+      updateSoundMenu();
+    }
+    function setMusicVolume(patch) {
+      if (!musicState) return;
+      musicState = { ...musicState, ...(patch.volume !== undefined && { screenVolume: patch.volume }), ...(patch.muted !== undefined && { muted: patch.muted }) };
+      applyMusicVolume();
+      send({ type: 'musicVolume', ...patch });
+      updateSoundMenu();
+    }
+
+    // Spielzeit wie in der Verwaltung: Video, Text mit Dauer oder Restzeit der Auto-Zeit
+    let due = null; // { dueAt, duration } in Serverzeit (ms)
+    function playtime() {
+      const v = visibleVideo();
+      if (v && isFinite(v.duration) && v.duration > 0) return { t: v.currentTime, d: v.duration };
+      if (textTimer) return { t: Math.max(0, textTimer.elapsed), d: textTimer.duration };
+      if (due?.dueAt && mode === 'play') {
+        const d = due.duration / 1000;
+        return { t: Math.max(0, Math.min(d, d - (due.dueAt - serverNow()) / 1000)), d };
+      }
+      return null;
+    }
+    const fmtTime = (sec) => {
+      sec = Math.max(0, Math.floor(sec));
+      const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = String(sec % 60).padStart(2, '0');
+      return h ? `${h}:${String(m).padStart(2, '0')}:${s}` : `${m}:${s}`;
+    };
+    function updateMenuProgress() {
+      const p = playtime();
+      const box = menu.querySelector('.m-progress');
+      box.hidden = !p;
+      if (!p) return;
+      menu.querySelector('.m-time').textContent = `${fmtTime(p.t)} / ${fmtTime(p.d)}`;
+      menu.querySelector('.m-bar > div').style.width = `${Math.min(100, (p.t / p.d) * 100)}%`;
+    }
+    setInterval(() => !menu.hidden && updateMenuProgress(), 250);
+
+    function showMenu() {
+      updateMenu();
+      menu.hidden = false;
+      document.body.classList.add('menu-open');
+      clearTimeout(menuTimer);
+      menuTimer = setTimeout(hideMenu, 10000);
+    }
+    function hideMenu() {
+      clearTimeout(menuTimer);
+      menu.querySelector('.m-qr').hidden = true;
+      menu.hidden = true;
+      document.body.classList.remove('menu-open');
+    }
+
+    menu.addEventListener('input', (e) => {
+      const volume = Number(e.target.value);
+      if (e.target.dataset.m === 'vol-video') setVideoAudio({ enabled: volume > 0, volume });
+      else if (e.target.dataset.m === 'vol-music') setMusicVolume({ volume, muted: volume === 0 });
+      else return;
+      clearTimeout(menuTimer); // Anzeige verlängern
+      menuTimer = setTimeout(hideMenu, 10000);
     });
+
+    menu.addEventListener('change', (e) => {
+      if (e.target.dataset.m !== 'quality') return;
+      send({ type: 'quality', value: e.target.value });
+      showMenu(); // Anzeige verlängern
+    });
+
+    menu.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (!e.target.closest('.m-panel')) return hideMenu(); // Klick neben die Karte schließt
+      const action = e.target.closest('button')?.dataset.m;
+      if (action === 'fullscreen') toggleFullscreen();
+      if (action === 'reload') return location.reload();
+      if (action === 'pause') send({ type: 'mode', mode: mode === 'pause' ? 'play' : 'pause' });
+      if (action === 'qr') {
+        const box = menu.querySelector('.m-qr');
+        box.hidden = !box.hidden;
+        if (!box.hidden) {
+          box.querySelector('img').src = '/qr.svg?for=screen&t=' + Date.now();
+          fetch('/connect.json').then((r) => r.json()).then((u) => (box.querySelector('.m-qr-url').textContent = u.screen)).catch(() => {});
+          clearTimeout(menuTimer);
+          menuTimer = setTimeout(hideMenu, 60000); // Zeit zum Scannen
+          return;
+        }
+      }
+      if (action === 'remote') {
+        remoteBox.hidden = !remoteBox.hidden;
+        if (!remoteBox.hidden) {
+          send({ type: 'remoteList' });
+          updateRemoteBox();
+        }
+      }
+      if (action === 'remote-pick') {
+        const x = remoteChoice?.find((c) => c.id === e.target.closest('button').dataset.id);
+        if (x) x.on = !x.on;
+        updateRemoteBox();
+      }
+      if (action === 'remote-start') {
+        send({ type: 'remote', action: 'start', targets: (remoteChoice ?? []).filter((x) => x.on).map((x) => x.id) });
+        remoteBox.hidden = true;
+        return hideMenu();
+      }
+      if (action === 'remote-stop') {
+        send({ type: 'remote', action: 'stop' });
+        remoteBox.hidden = true;
+      }
+      // Einschalten bei Lautstärke 0: auf die Hälfte stellen, sonst bliebe es still
+      if (action === 'mute-video') setVideoAudio(audio.enabled ? { enabled: false } : { enabled: true, ...(audio.volume === 0 && { volume: 50 }) });
+      if (action === 'mute-music') {
+        setMusicVolume(!musicState?.muted ? { muted: true } : { muted: false, ...(musicState.screenVolume === 0 && { volume: 50 }) });
+      }
+      if (action === 'mute-video' || action === 'mute-music') {
+        if (musicState?.enabled && musicState.playing && musicPlayer.paused) applyMusic(); // Tippen schaltet blockierten Ton frei
+      }
+      if (action === 'close') return hideMenu(); // Vollbild/Anhalten: Menü bleibt offen und zeigt den neuen Zustand
+      showMenu(); // Bedienung verlängert die Anzeige
+    });
+    document.addEventListener('fullscreenchange', () => !menu.hidden && updateMenu());
+    document.addEventListener('keydown', (e) => e.key === 'Escape' && hideMenu());
+
+    // -----------------------------------------------------------------------
+    // Zoom per Fingergeste (in der Verwaltung abschaltbar): zwei Finger vergrößern,
+    // ein Finger verschiebt, Doppeltippen vergrößert bzw. setzt zurück.
+    // Bilder/Texte: solange vergrößert ist, hält der Screen an (Verwaltung sieht „⏸ Client“).
+    // Nach 60 s ohne Berührung oder beim nächsten Inhalt wird zurückgesetzt.
+    // -----------------------------------------------------------------------
+
+    let touchZoom = true;
+    const ZOOM_MAX = 5;
+    const zoom = { s: 1, x: 0, y: 0 };
+    const touches = new Map(); // pointerId -> { x, y }
+    let gesture = null; // Ausgangslage der laufenden Geste
+    let gestureMoved = false; // war eine Geste, kein Antippen (kein Menü)
+    let zoomHeld = false; // wegen des Zooms am Screen angehalten
+    let zoomIdle = null;
+
+    const zoomable = () =>
+      touchZoom && currentItem && currentItem.type !== 'url' && (mode === 'play' || mode === 'pause');
+    const zoomed = () => zoom.s > 1.001;
+
+    function applyZoom(animate = false) {
+      zoom.s = Math.min(ZOOM_MAX, Math.max(1, zoom.s));
+      // Inhalt bleibt bildschirmfüllend: nicht über den Rand hinaus verschieben
+      zoom.x = Math.min(0, Math.max(innerWidth * (1 - zoom.s), zoom.x));
+      zoom.y = Math.min(0, Math.max(innerHeight * (1 - zoom.s), zoom.y));
+      const el = layers[front];
+      el.style.transition = animate ? 'opacity .8s ease, transform .25s ease' : '';
+      el.style.transformOrigin = '0 0';
+      el.style.transform = zoomed() ? `translate(${zoom.x}px, ${zoom.y}px) scale(${zoom.s})` : '';
+      holdForZoom(zoomed());
+      clearTimeout(zoomIdle);
+      if (zoomed() && remote?.role !== 'target') zoomIdle = setTimeout(() => resetZoom(true), 60000);
+      if (remote?.role === 'controller') sendRemoteZoom();
+      remoteBar.querySelector('[data-r=unzoom]').hidden = !zoomed();
+    }
+
+    function resetZoom(animate = false) {
+      Object.assign(zoom, { s: 1, x: 0, y: 0 });
+      applyZoom(animate);
+    }
+
+    // Bilder und Texte während des Zooms anhalten, danach wieder fortsetzen (Videos laufen weiter)
+    function holdForZoom(on) {
+      if (remote) return; // in der Fernsteuerung bleibt der Inhalt ohnehin stehen
+      if (on && !zoomHeld && mode === 'play' && currentItem?.type !== 'video') {
+        zoomHeld = true;
+        send({ type: 'mode', mode: 'pause' });
+      } else if (!on && zoomHeld) {
+        zoomHeld = false;
+        if (mode === 'pause' && modeBy === 'screen') send({ type: 'mode', mode: 'play' });
+      }
+    }
+
+    function toggleZoomAt(x, y) {
+      if (zoomed()) return resetZoom(true);
+      const s = 2.5;
+      Object.assign(zoom, { s, x: x - x * s, y: y - y * s }); // Punkt unter dem Finger bleibt stehen
+      applyZoom(true);
+    }
+
+    const center = (a, b) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
+    function startGesture() {
+      const pts = [...touches.values()];
+      gesture = {
+        s: zoom.s, x: zoom.x, y: zoom.y, n: pts.length,
+        mid: pts.length > 1 ? center(pts[0], pts[1]) : pts[0],
+        dist: pts.length > 1 ? Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y) : 0,
+      };
+    }
+
+    document.addEventListener('pointerdown', (e) => {
+      if (penOn || e.pointerType === 'mouse' || e.target.closest('#menu, #remoteBar, #penBar, #soundBar') || !(zoomable() || remote?.role === 'controller')) return;
+      if (!touches.size) gestureMoved = false;
+      touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      startGesture();
+    });
+    document.addEventListener('pointermove', (e) => {
+      if (!touches.has(e.pointerId)) return;
+      touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      const pts = [...touches.values()];
+      if (pts.length !== gesture.n) startGesture();
+      if (pts.length >= 2) {
+        // Zwei Finger: der Punkt zwischen den Fingern bleibt unter den Fingern
+        const mid = center(pts[0], pts[1]);
+        const s = Math.min(ZOOM_MAX, Math.max(1, (gesture.s * Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y)) / (gesture.dist || 1)));
+        const px = (gesture.mid.x - gesture.x) / gesture.s;
+        const py = (gesture.mid.y - gesture.y) / gesture.s;
+        Object.assign(zoom, { s, x: mid.x - px * s, y: mid.y - py * s });
+        gestureMoved = true;
+        applyZoom();
+      } else if (zoomed()) {
+        // Ein Finger: vergrößerten Inhalt verschieben
+        const dx = pts[0].x - gesture.mid.x;
+        const dy = pts[0].y - gesture.mid.y;
+        if (!gestureMoved && Math.hypot(dx, dy) < 10) return; // kleines Zittern beim Antippen
+        Object.assign(zoom, { x: gesture.x + dx, y: gesture.y + dy });
+        gestureMoved = true;
+        applyZoom();
+      }
+    });
+    const endTouch = (e) => {
+      if (!touches.delete(e.pointerId)) return;
+      // Fernsteuerung: waagerecht wischen (nicht vergrößert) = vor/zurück
+      if (!touches.size && gesture?.n === 1 && remote?.role === 'controller' && !zoomed()) {
+        const dx = e.clientX - gesture.mid.x;
+        const dy = e.clientY - gesture.mid.y;
+        if (Math.abs(dx) > 60 && Math.abs(dx) > 1.5 * Math.abs(dy)) {
+          gestureMoved = true;
+          remoteStep(dx < 0 ? 'next' : 'prev');
+        }
+      }
+      if (touches.size) startGesture();
+      else if (zoom.s < 1.05) resetZoom(true); // fast ganz heraus gezoomt: zurück auf normal
+    };
+    document.addEventListener('pointerup', endTouch);
+    document.addEventListener('pointercancel', endTouch);
+    addEventListener('resize', () => zoomed() && applyZoom());
+
+    function setTouchZoom(on) {
+      touchZoom = on !== false;
+      document.body.classList.toggle('touch-zoom', touchZoom);
+      if (!touchZoom && zoomed()) resetZoom();
+    }
+
+    // -----------------------------------------------------------------------
+    // Fernsteuerung: Dieses Gerät steuert andere Screens (Auswahl im Menü). Die Gruppe zeigt
+    // denselben Eintrag; Weiterschalten (Leiste, Wischen, Pfeiltasten) und Zoom gelten für alle.
+    // Der Zoom wird bezogen auf das Bild übertragen, damit er auch bei anderem Seitenverhältnis passt.
+    // -----------------------------------------------------------------------
+
+    let remote = null; // { role: 'controller', targets: [Namen] } | { role: 'target', by } | null
+    let remoteAllowed = false; // in der Verwaltung freigeschaltet: darf andere Screens steuern
+    let rot = 0; // Drehung des aktuellen Inhalts in Vierteldrehungen (im Uhrzeigersinn)
+    const remoteBar = document.getElementById('remoteBar');
+    const remoteBox = menu.querySelector('.m-remote');
+    let remoteChoice = null; // Auswahl im Menü: Liste der Screens vom Server
+
+    function setRemote(r) {
+      remote = r ?? null;
+      const ctrl = remote?.role === 'controller';
+      remoteBar.hidden = !ctrl;
+      document.body.classList.toggle('remote-ctrl', ctrl);
+      if (!ctrl) {
+        setPen(false);
+        setSoundBar(false);
+      }
+      if (!remote && strokes.length) clearInk();
+      if (!remote && rot) setRotation(0);
+      if (ctrl) remoteBar.querySelector('.rb-targets').textContent = remote.targets.length ? '→ ' + remote.targets.join(', ') : t('keine Screens gewählt');
+      if (!menu.hidden) updateRemoteBox();
+    }
+
+    const remoteStep = (dir) => send({ type: 'remote', action: dir });
+
+    // Bildbereich des Inhalts (Bilder/Videos werden eingepasst, alles andere füllt den Screen).
+    // Gedreht zählt der sichtbare (gedrehte) Bereich – alle Screens der Gruppe sind gleich gedreht.
+    function contentRect() {
+      const el = layers[front].firstElementChild;
+      let nw = el?.naturalWidth || el?.videoWidth;
+      let nh = el?.naturalHeight || el?.videoHeight;
+      if (!nw || !nh) return { left: 0, top: 0, w: innerWidth, h: innerHeight };
+      if (rot % 2) [nw, nh] = [nh, nw];
+      const f = Math.min(innerWidth / nw, innerHeight / nh);
+      return { left: (innerWidth - nw * f) / 2, top: (innerHeight - nh * f) / 2, w: nw * f, h: nh * f };
+    }
+
+    // Steuerndes Gerät: Bildmitte als Punkt im Bild (0–1) und Vergrößerung senden, höchstens einmal pro Bild
+    let zoomSendPending = false;
+    function sendRemoteZoom() {
+      if (zoomSendPending) return;
+      zoomSendPending = true;
+      requestAnimationFrame(() => {
+        zoomSendPending = false;
+        const r = contentRect();
+        const cx = (innerWidth / 2 - zoom.x) / zoom.s;
+        const cy = (innerHeight / 2 - zoom.y) / zoom.s;
+        send({ type: 'remoteZoom', itemId: currentItem?.id, s: zoom.s, u: (cx - r.left) / r.w, v: (cy - r.top) / r.h });
+      });
+    }
+
+    // Gesteuerter Screen: denselben Bildpunkt in die Mitte holen
+    function applyRemoteZoom(m) {
+      if (remote?.role !== 'target' || m.itemId !== currentItem?.id) return;
+      const r = contentRect();
+      const lx = r.left + m.u * r.w;
+      const ly = r.top + m.v * r.h;
+      Object.assign(zoom, { s: m.s, x: innerWidth / 2 - lx * m.s, y: innerHeight / 2 - ly * m.s });
+      applyZoom(true);
+    }
+
+    // Auswahl im Menü
+    function updateRemoteBox() {
+      const ctrl = remote?.role === 'controller';
+      const note = remoteBox.querySelector('.m-remote-note');
+      if (remote?.role === 'target') {
+        remoteBox.hidden = false;
+        remoteBox.querySelector('.m-chips').replaceChildren();
+        note.textContent = t('Wird ferngesteuert von „{0}“.', remote.by);
+        remoteBox.querySelector('[data-m=remote-start]').hidden = true;
+        remoteBox.querySelector('[data-m=remote-stop]').hidden = false;
+        return;
+      }
+      remoteBox.querySelector('[data-m=remote-start]').hidden = false;
+      remoteBox.querySelector('[data-m=remote-stop]').hidden = !ctrl;
+      remoteBox.querySelector('[data-m=remote-start]').textContent = ctrl ? t('Übernehmen') : t('Starten');
+      if (!remoteChoice) return;
+      const chips = remoteBox.querySelector('.m-chips');
+      chips.replaceChildren(
+        ...remoteChoice.map((x) => {
+          const b = document.createElement('button');
+          b.className = 'm-chip' + (x.on ? ' on' : '') + (x.online ? '' : ' off');
+          b.dataset.m = 'remote-pick';
+          b.dataset.id = x.id;
+          b.translate = false;
+          b.textContent = (x.on ? '✓ ' : '') + x.name;
+          return b;
+        })
+      );
+      note.textContent = remoteChoice.length ? t('Weiterschalten per Pfeil oder Wischen, Zoom wird übertragen.') : t('Keine anderen Screens vorhanden.');
+      remoteBox.querySelector('[data-m=remote-start]').disabled = !remoteChoice.some((x) => x.on);
+    }
+
+    // -----------------------------------------------------------------------
+    // Stift (nur am steuernden Gerät): zeichnet auf das Bild, die Striche erscheinen live auf den
+    // gesteuerten Screens. Punkte werden bezogen auf das Bild (0–1) gespeichert, die Striche liegen
+    // in der Bildebene und zoomen mit. Beim nächsten Inhalt sind sie weg.
+    // -----------------------------------------------------------------------
+
+    const SVG_NS = 'http://www.w3.org/2000/svg';
+    const PEN_COLORS = ['#ef4444', '#facc15', '#22c55e', '#3b82f6', '#ffffff'];
+    const PEN_SIZES = [6, 12, 24]; // Promille der kürzeren Bildseite
+    const penBar = document.getElementById('penBar');
+    let penOn = false;
+    let pen = { color: PEN_COLORS[0], size: PEN_SIZES[1] };
+    try { pen = { ...pen, ...JSON.parse(storage.get('screendeck-pen') || '{}') }; } catch {}
+    let strokes = []; // Striche zum aktuellen Inhalt: { id, color, size, pts: [u, v, u, v, …] }
+    let drawing = null; // Strich, der gerade gezeichnet wird
+
+    penBar.innerHTML =
+      PEN_COLORS.map((c) => `<button class="pen-color" data-color="${c}" style="--c:${c}" title="Farbe"><i></i></button>`).join('') +
+      '<span class="pen-sep"></span>' +
+      PEN_SIZES.map((n, i) => `<button class="pen-size" data-size="${n}" title="${['dünn', 'mittel', 'dick'][i]}"><i style="width:${6 + i * 5}px;height:${6 + i * 5}px"></i></button>`).join('') +
+      '<span class="pen-sep"></span>' +
+      '<button class="pen-undo" data-p="clear" title="Zeichnung löschen"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v6M14 11v6"/></svg></button>' +
+      '<button class="pen-undo" data-p="undo" title="Letzten Strich zurücknehmen"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/></svg></button>';
+
+    function updatePenBar() {
+      penBar.hidden = !penOn;
+      document.body.classList.toggle('pen-on', penOn);
+      remoteBar.querySelector('[data-r=pen]').classList.toggle('on', penOn);
+      for (const b of penBar.querySelectorAll('.pen-color')) b.classList.toggle('on', b.dataset.color === pen.color);
+      for (const b of penBar.querySelectorAll('.pen-size')) b.classList.toggle('on', Number(b.dataset.size) === pen.size);
+      for (const b of penBar.querySelectorAll('.pen-undo')) b.disabled = !strokes.length;
+    }
+    function setPen(on) {
+      penOn = on && remote?.role === 'controller';
+      updatePenBar();
+    }
+
+    // Striche als SVG in der Bildebene (über dem Inhalt der vorderen Ebene)
+    let inkFrame = 0;
+    function renderInk() {
+      inkFrame = 0;
+      const layer = layers[front];
+      let ink = layer.querySelector(':scope > svg.ink');
+      if (!strokes.length) return ink?.remove();
+      if (!ink) {
+        ink = document.createElementNS(SVG_NS, 'svg');
+        ink.setAttribute('class', 'ink');
+        layer.appendChild(ink);
+      }
+      const r = contentRect();
+      const unit = Math.min(r.w, r.h) / 1000;
+      ink.setAttribute('viewBox', `0 0 ${innerWidth} ${innerHeight}`);
+      ink.replaceChildren(
+        ...strokes.map((st) => {
+          const line = document.createElementNS(SVG_NS, 'polyline');
+          let pts = '';
+          for (let i = 0; i < st.pts.length; i += 2) pts += `${(r.left + st.pts[i] * r.w).toFixed(1)},${(r.top + st.pts[i + 1] * r.h).toFixed(1)} `;
+          line.setAttribute('points', pts);
+          line.setAttribute('fill', 'none');
+          line.setAttribute('stroke', st.color);
+          line.setAttribute('stroke-width', (st.size * unit).toFixed(2));
+          line.setAttribute('stroke-linecap', 'round');
+          line.setAttribute('stroke-linejoin', 'round');
+          return line;
+        })
+      );
+    }
+    const scheduleInk = () => (inkFrame ||= requestAnimationFrame(renderInk));
+    function clearInk() {
+      strokes = [];
+      drawing = null;
+      for (const l of layers) l.querySelector(':scope > svg.ink')?.remove();
+      updatePenBar();
+    }
+    addEventListener('resize', () => strokes.length && scheduleInk());
+
+    // Bildschirmpunkt → Punkt im Bild (0–1), auch bei Zoom
+    function toImage(cx, cy) {
+      const r = contentRect();
+      const lx = (cx - zoom.x) / zoom.s;
+      const ly = (cy - zoom.y) / zoom.s;
+      return [Math.round(((lx - r.left) / r.w) * 10000) / 10000, Math.round(((ly - r.top) / r.h) * 10000) / 10000];
+    }
+
+    // Neue Punkte höchstens einmal pro Bild senden
+    let drawSendFrame = 0;
+    function flushDraw() {
+      drawSendFrame = 0;
+      if (!drawing || drawing.sent >= drawing.pts.length) return;
+      send({ type: 'remoteDraw', op: 'append', id: drawing.id, itemId: currentItem?.id, pts: drawing.pts.slice(drawing.sent) });
+      drawing.sent = drawing.pts.length;
+    }
+
+    document.addEventListener('pointerdown', (e) => {
+      if (!penOn || drawing || e.target.closest('#menu, #remoteBar, #penBar, #soundBar')) return;
+      e.preventDefault();
+      const p = toImage(e.clientX, e.clientY);
+      drawing = { id: Math.random().toString(36).slice(2, 10), color: pen.color, size: pen.size, pts: [...p, ...p], pointer: e.pointerId, sent: 0 };
+      strokes.push(drawing);
+      send({ type: 'remoteDraw', op: 'start', id: drawing.id, itemId: currentItem?.id, color: drawing.color, size: drawing.size, pts: drawing.pts });
+      drawing.sent = drawing.pts.length;
+      updatePenBar();
+      scheduleInk();
+    });
+    document.addEventListener('pointermove', (e) => {
+      if (!drawing || e.pointerId !== drawing.pointer) return;
+      for (const ev of e.getCoalescedEvents?.() ?? [e]) drawing.pts.push(...toImage(ev.clientX, ev.clientY));
+      scheduleInk();
+      drawSendFrame ||= requestAnimationFrame(flushDraw);
+    });
+    const endStroke = (e) => {
+      if (!drawing || e.pointerId !== drawing.pointer) return;
+      flushDraw();
+      drawing = null;
+    };
+    document.addEventListener('pointerup', endStroke);
+    document.addEventListener('pointercancel', endStroke);
+
+    function undoStroke() {
+      const last = strokes.pop();
+      if (!last) return;
+      if (last === drawing) drawing = null;
+      send({ type: 'remoteDraw', op: 'undo', id: last.id, itemId: currentItem?.id });
+      updatePenBar();
+      scheduleInk();
+    }
+
+    // Gesteuerter Screen: Striche vom steuernden Gerät übernehmen
+    function applyRemoteDraw(m) {
+      if (remote?.role !== 'target') return;
+      if (m.op === 'start') {
+        if (m.itemId !== currentItem?.id) return;
+        strokes.push({ id: m.id, color: m.color, size: m.size, pts: m.pts });
+      } else if (m.op === 'append') strokes.find((st) => st.id === m.id)?.pts.push(...m.pts);
+      else if (m.op === 'undo') strokes = strokes.filter((st) => st.id !== m.id);
+      else if (m.op === 'clear') strokes = [];
+      scheduleInk();
+    }
+
+    penBar.addEventListener('click', (e) => {
+      e.stopPropagation(); // kein Menü
+      const b = e.target.closest('button');
+      if (!b) return;
+      if (b.dataset.color) pen.color = b.dataset.color;
+      if (b.dataset.size) pen.size = Number(b.dataset.size);
+      if (b.dataset.p === 'undo') undoStroke();
+      if (b.dataset.p === 'clear' && strokes.length) {
+        // ganze Zeichnung zurücksetzen, auch auf den gesteuerten Screens
+        send({ type: 'remoteDraw', op: 'clear', itemId: currentItem?.id });
+        clearInk();
+      }
+      storage.set('screendeck-pen', JSON.stringify({ color: pen.color, size: pen.size }));
+      updatePenBar();
+    });
+    penBar.addEventListener('pointerdown', (e) => e.stopPropagation());
+
+    // -----------------------------------------------------------------------
+    // Drehung (Fernsteuerung): Bild/Video in Vierteldrehungen, auf allen Screens der Gruppe gleich.
+    // Striche drehen mit, der Zoom beginnt neu. Beim nächsten Inhalt ist die Drehung weg.
+    // -----------------------------------------------------------------------
+
+    const rotatable = () => currentItem?.type === 'image' || currentItem?.type === 'video';
+
+    function applyRotation() {
+      const el = layers[front].firstElementChild;
+      if (!el || !(el.tagName === 'IMG' || el.tagName === 'VIDEO')) return;
+      // gedreht um 90°/270°: Element mit vertauschten Seiten, damit das Bild nach dem Drehen eingepasst ist
+      const odd = rot % 2;
+      el.classList.toggle('rotated', rot > 0);
+      el.style.width = odd ? innerHeight + 'px' : '';
+      el.style.height = odd ? innerWidth + 'px' : '';
+      el.style.transform = rot ? `rotate(${rot * 90}deg)` : '';
+    }
+
+    function setRotation(r) {
+      r = ((r % 4) + 4) % 4;
+      // Striche mitdrehen: Punkt im Bild (u, v) → (1 − v, u) je Vierteldrehung
+      for (let n = (r - rot + 4) % 4; n > 0; n--)
+        for (const st of strokes) for (let i = 0; i < st.pts.length; i += 2) [st.pts[i], st.pts[i + 1]] = [1 - st.pts[i + 1], st.pts[i]];
+      rot = r;
+      applyRotation();
+      resetZoom();
+      if (strokes.length) scheduleInk();
+      remoteBar.querySelector('[data-r=rotate]').classList.toggle('on', rot > 0);
+    }
+    addEventListener('resize', () => rot % 2 && applyRotation());
+
+    // -----------------------------------------------------------------------
+    // Ton (nur am steuernden Gerät): Musik und Video-Ton der gesteuerten Screens, Musiktitel wählen.
+    // Gesteuert wird ein wählbarer Screen (vorgewählt: der erste gesteuerte). Titel und das Verhalten
+    // bei Videos mit Ton gelten für die Musik aller Screens.
+    // -----------------------------------------------------------------------
+
+    const soundBar = document.getElementById('soundBar');
+    let remoteSoundState = null; // vom Server: { screenId, screens, music: { muted, volume, playing, title, tracks, behavior, duckLevel }, video: { enabled, volume } }
+    let soundDragging = false;
+
+    function setSoundBar(on) {
+      soundBar.hidden = !(on && remote?.role === 'controller');
+      remoteBar.querySelector('[data-r=sound]').classList.toggle('on', !soundBar.hidden);
+      if (!soundBar.hidden) {
+        setPen(false);
+        updateSoundBar();
+        send({ type: 'remoteSound' }); // aktuellen Stand und Screen-Liste holen
+      }
+    }
+
+    function updateSoundBar() {
+      const s = remoteSoundState;
+      if (soundBar.hidden || !s) return;
+      soundBar.querySelector('.sb-screens').replaceChildren(
+        ...(s.screens ?? []).map((x) => {
+          const b = document.createElement('button');
+          b.className = 'm-chip' + (x.id === s.screenId ? ' on' : '') + (x.online ? '' : ' off');
+          b.dataset.s = 'screen';
+          b.dataset.id = x.id;
+          b.translate = false;
+          b.textContent = (x.id === s.screenId ? '✓ ' : '') + x.name;
+          return b;
+        })
+      );
+      for (const el of soundBar.querySelectorAll('.m-vol[data-kind=music], .m-vol[data-kind=video]')) el.classList.toggle('sb-disabled', !s.screenId);
+      const row = (kind, muted, vol) => {
+        const r = soundBar.querySelector(`.m-vol[data-kind=${kind}]`);
+        r.classList.toggle('muted', muted);
+        if (!soundDragging) r.querySelector('input').value = vol;
+        r.querySelector('.m-vol-val').textContent = vol + '%';
+      };
+      row('music', s.music.muted, s.music.volume);
+      row('video', !s.video.enabled, s.video.volume);
+      // Musik bei Video mit Ton (für alle Screens): Verhalten, beim Leiserwerden mit Stufe
+      const beh = soundBar.querySelector('[data-s=behavior]');
+      if (document.activeElement !== beh) beh.value = s.music.behavior;
+      soundBar.querySelector('[data-kind=duck]').hidden = s.music.behavior !== 'duck';
+      row('duck', false, s.music.duckLevel);
+      soundBar.querySelector('.sb-track').hidden = !s.music.tracks;
+      soundBar.querySelector('.sb-play').style.display = s.music.playing ? 'none' : '';
+      soundBar.querySelector('.sb-pause').style.display = s.music.playing ? '' : 'none';
+      soundBar.querySelector('.sb-title').textContent = s.music.title || t('Kein Titel');
+    }
+
+    // Änderungen sammeln und höchstens alle 100 ms senden (Schieberegler)
+    let soundPending = null;
+    let soundTimer = 0;
+    function sendSound(p) {
+      soundPending = {
+        music: { ...soundPending?.music, ...p.music },
+        video: { ...soundPending?.video, ...p.video },
+        duck: { ...soundPending?.duck, ...p.duck },
+        track: p.track ?? soundPending?.track,
+      };
+      soundTimer ||= setTimeout(() => {
+        soundTimer = 0;
+        send({ type: 'remoteSound', ...soundPending });
+        soundPending = null;
+      }, 100);
+    }
+
+    soundBar.addEventListener('input', (e) => {
+      const s = remoteSoundState;
+      if (!s) return;
+      const v = Number(e.target.value);
+      if (e.target.dataset.s === 'vol-music') {
+        Object.assign(s.music, { volume: v, muted: v === 0 });
+        sendSound({ music: { volume: v, muted: v === 0 } });
+      } else if (e.target.dataset.s === 'vol-video') {
+        s.video.volume = v;
+        sendSound({ video: { volume: v } });
+      } else if (e.target.dataset.s === 'duck') {
+        s.music.duckLevel = v;
+        sendSound({ duck: { level: v } });
+      } else if (e.target.dataset.s === 'behavior') {
+        s.music.behavior = e.target.value;
+        sendSound({ duck: { behavior: e.target.value } });
+        e.target.blur();
+      }
+      updateSoundBar();
+    });
+    soundBar.addEventListener('click', (e) => {
+      e.stopPropagation(); // kein Menü
+      const action = e.target.closest('button')?.dataset.s;
+      const s = remoteSoundState;
+      if (!action || !s) return;
+      if (action === 'screen') {
+        // anderen Screen wählen: Offenes noch an den bisherigen senden, die neuen Werte kommen vom Server
+        if (soundTimer) {
+          clearTimeout(soundTimer);
+          soundTimer = 0;
+          send({ type: 'remoteSound', ...soundPending });
+          soundPending = null;
+        }
+        s.screenId = e.target.closest('button').dataset.id;
+        send({ type: 'remoteSound', screenId: s.screenId });
+      }
+      if (action === 'mute-music') {
+        // stumm → laut (bei 0 % mit halber Lautstärke), sonst stumm
+        const p = s.music.muted ? { muted: false, ...(s.music.volume === 0 && { volume: 50 }) } : { muted: true };
+        Object.assign(s.music, p);
+        sendSound({ music: p });
+      }
+      if (action === 'mute-video') {
+        s.video.enabled = !s.video.enabled;
+        sendSound({ video: { enabled: s.video.enabled } });
+      }
+      if (action === 'prev' || action === 'next') sendSound({ track: action });
+      if (action === 'play') {
+        sendSound({ track: s.music.playing ? 'pause' : 'play' });
+        s.music.playing = !s.music.playing;
+      }
+      updateSoundBar();
+    });
+    soundBar.addEventListener('pointerdown', (e) => {
+      e.stopPropagation();
+      if (e.target.matches('input')) soundDragging = true;
+    });
+    addEventListener('pointerup', () => (soundDragging = false));
+
+    remoteBar.addEventListener('click', (e) => {
+      e.stopPropagation(); // kein Menü
+      const action = e.target.closest('button')?.dataset.r;
+      if (action === 'pen') {
+        setSoundBar(false);
+        setPen(!penOn);
+      }
+      if (action === 'sound') setSoundBar(soundBar.hidden);
+      if (action === 'rotate' && rotatable()) {
+        setRotation(rot + 1);
+        send({ type: 'remoteRotate', itemId: currentItem?.id, r: rot });
+      }
+      if (action === 'next' || action === 'prev') remoteStep(action);
+      if (action === 'unzoom') resetZoom(true);
+      if (action === 'stop') send({ type: 'remote', action: 'stop' });
+    });
+    document.addEventListener('keydown', (e) => {
+      if (remote?.role !== 'controller' || e.target.closest?.('input, select')) return;
+      if (e.key === 'ArrowRight' || e.key === 'PageDown' || e.key === ' ') remoteStep('next');
+      if (e.key === 'ArrowLeft' || e.key === 'PageUp') remoteStep('prev');
+      if (e.key.toLowerCase() === 'z' && (e.ctrlKey || e.metaKey)) undoStroke();
+    });
+
+    // Tippen/Klicken: Menü ein/aus, Ton freischalten, blockiertes Video starten.
+    // Mit Zoom wartet ein einzelnes Antippen kurz, ob ein zweites folgt (Doppeltippen = Zoom).
+    let tapTimer = null;
+    function tapAction() {
+      if (!menuEnabled) {
+        if (!isFullscreen()) toggleFullscreen();
+        return;
+      }
+      menu.hidden ? showMenu() : hideMenu();
+    }
+    document.addEventListener('click', (e) => {
+      hint.style.opacity = 0;
+      restartVisibleVideo();
+      if (musicState?.enabled && musicState.playing && musicPlayer.paused) applyMusic();
+      if (gestureMoved) return (gestureMoved = false); // Ende einer Zoom-/Verschiebe-Geste
+      if (penOn) return; // Stift: Antippen setzt einen Punkt, kein Menü
+      if (!zoomable()) return tapAction();
+      if (tapTimer) {
+        clearTimeout(tapTimer);
+        tapTimer = null;
+        return toggleZoomAt(e.clientX, e.clientY);
+      }
+      tapTimer = setTimeout(() => {
+        tapTimer = null;
+        tapAction();
+      }, 280);
+    });
+
+    function setMenuEnabled(on) {
+      menuEnabled = on !== false;
+      hint.textContent = menuEnabled ? 'Tippen für Menü' : 'Tippen für Vollbild';
+      if (!menuEnabled) hideMenu();
+    }
 
     // Bildschirm wach halten (nur in sicheren Kontexten verfügbar, z. B. https oder localhost)
     async function keepAwake() {
