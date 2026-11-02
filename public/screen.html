@@ -1,0 +1,488 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <title>ScreenDeck Screen</title>
+  <link rel="icon" href="/logo.svg" type="image/svg+xml">
+  <style>
+    html, body { margin: 0; height: 100%; background: #000; color: #fff; overflow: hidden; cursor: none;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+    #stage, .layer { position: fixed; inset: 0; }
+    .layer { opacity: 0; transition: opacity .8s ease; display: flex; align-items: center; justify-content: center; }
+    .layer.visible { opacity: 1; }
+    .layer img, .layer video { width: 100%; height: 100%; object-fit: contain; }
+    .layer iframe { width: 100%; height: 100%; border: 0; background: #fff; }
+    .text { width: 100%; height: 100%; box-sizing: border-box; padding: 6vmin; display: flex; flex-direction: column; align-items: center;
+      justify-content: center; text-align: center; white-space: pre-wrap; font-size: 7vmin; font-weight: 600; line-height: 1.2; }
+    .text.edge-soft { padding: 8vmin; }
+    .text.edge-strong { padding: 16vmin; }
+    .text .cd { margin-top: 5vmin; font-size: 14vmin; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1; }
+    .idle { text-align: center; opacity: .35; }
+    .idle h1 { font-size: 6vmin; margin: 0 0 1vmin; font-weight: 600; }
+    .idle p { font-size: 2.5vmin; margin: 0; }
+    #cover { position: fixed; inset: 0; z-index: 5; background: #000; opacity: 0; pointer-events: none;
+      transition: opacity .6s ease; display: flex; align-items: center; justify-content: center; }
+    #cover.on { opacity: 1; }
+    #cover img.fit { position: absolute; max-width: 100%; max-height: 100%; }
+    .standby-text { position: absolute; left: 0; right: 0; padding: 6vmin; box-sizing: border-box; text-align: center;
+      white-space: pre-wrap; font-size: 8vmin; font-weight: 700; line-height: 1.2; text-shadow: 0 0 2vmin rgba(0,0,0,.85), 0 0 .5vmin #000; }
+    .standby-text.pos-top { top: 0; }
+    .standby-text.pos-center { top: 50%; transform: translateY(-50%); }
+    .standby-text.pos-bottom { bottom: 0; }
+
+    /* Weiche Ecken: abgerundet und zum Rand hin ausgeblendet */
+    .edge-soft { --feather: 4vmin; border-radius: 4vmin; }
+    .edge-strong { --feather: 12vmin; border-radius: 10vmin; }
+    .edge-soft, .edge-strong {
+      -webkit-mask-image:
+        linear-gradient(to right, transparent, #000 var(--feather), #000 calc(100% - var(--feather)), transparent),
+        linear-gradient(to bottom, transparent, #000 var(--feather), #000 calc(100% - var(--feather)), transparent);
+      -webkit-mask-composite: source-in;
+      mask-image:
+        linear-gradient(to right, transparent, #000 var(--feather), #000 calc(100% - var(--feather)), transparent),
+        linear-gradient(to bottom, transparent, #000 var(--feather), #000 calc(100% - var(--feather)), transparent);
+      mask-composite: intersect;
+    }
+    #ident { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; z-index: 10;
+      background: rgba(20, 90, 220, .85); font-size: 12vmin; font-weight: 700; text-align: center; padding: 4vmin; }
+    #ident.on { display: flex; }
+    #status { position: fixed; right: 1.5vmin; bottom: 1.5vmin; width: 1.6vmin; height: 1.6vmin; min-width: 10px;
+      min-height: 10px; border-radius: 50%; background: #e33; z-index: 11; display: none; }
+    #status.on { display: block; }
+    #hint { position: fixed; left: 50%; bottom: 3vmin; transform: translateX(-50%); z-index: 11; font-size: 14px;
+      background: rgba(255,255,255,.12); padding: 8px 16px; border-radius: 20px; transition: opacity .5s; }
+  </style>
+</head>
+<body>
+  <div id="stage"><div class="layer"></div><div class="layer"></div></div>
+  <div id="cover"></div>
+  <div id="ident"></div>
+  <div id="status" title="Keine Verbindung zum Server"></div>
+  <div id="hint">Tippen für Vollbild</div>
+
+  <script src="/fonts.js?v={{VERSION}}"></script>
+  <script>
+    const PAGE_VERSION = '{{VERSION}}';
+    const params = new URLSearchParams(location.search);
+    const storage = {
+      get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+      set(k, v) { try { localStorage.setItem(k, v); } catch {} },
+    };
+
+    // Feste ID pro Gerät: ?id=... in der URL oder einmalig erzeugt und gespeichert
+    // Speicher-Schlüssel stammt noch vom alten Namen, bleibt, damit Geräte ihre ID behalten
+    let screenId = params.get('id') || storage.get('screensync-id');
+    if (!screenId) screenId = 's-' + Math.random().toString(36).slice(2, 10);
+    storage.set('screensync-id', screenId);
+
+    const layers = [...document.querySelectorAll('.layer')];
+    let front = 0;
+    let currentKey = null;
+    let token = 0;
+    let screenName = params.get('name') || '';
+    let ws = null;
+
+    // -----------------------------------------------------------------------
+    // Rückmeldung an den Server: was wird wirklich angezeigt?
+    // state: loading | showing | playing | idle | timeout | blocked | stalled | error
+    // -----------------------------------------------------------------------
+
+    // audio: on | off | blocked (nur bei Videos, sonst null)
+    // mode: tatsächlich angewendeter Modus (play | pause | image | dark)
+    const status = { itemId: null, updatedAt: null, state: 'loading', detail: null, audio: null, mode: 'play' };
+    let lastSent = '';
+
+    function report(patch, always = false) {
+      Object.assign(status, patch);
+      const json = JSON.stringify({ type: 'status', ...status });
+      if (json === lastSent && !always) return;
+      if (ws?.readyState === WebSocket.OPEN) {
+        ws.send(json);
+        lastSent = json;
+      }
+    }
+
+    // -----------------------------------------------------------------------
+    // Ton: Browser erlauben Ton erst nach einer Nutzeraktion (einmal tippen).
+    // Wird der Ton blockiert, läuft das Video stumm weiter statt anzuhalten.
+    // -----------------------------------------------------------------------
+
+    let audio = { enabled: false, volume: 80 };
+
+    // Ergebnis nur melden, wenn währenddessen nicht schon ein anderer Inhalt angezeigt wird
+    async function startVideo(v) {
+      const key = currentKey;
+      const stillCurrent = () => key === currentKey;
+      v.volume = audio.volume / 100;
+      if (audio.enabled) {
+        v.muted = false;
+        try {
+          await v.play();
+          if (stillCurrent()) report({ audio: 'on' });
+          return stillCurrent();
+        } catch {}
+      }
+      v.muted = true;
+      try {
+        await v.play();
+        if (stillCurrent()) report({ audio: audio.enabled ? 'blocked' : 'off' });
+        return stillCurrent();
+      } catch {
+        return false;
+      }
+    }
+
+    function visibleVideo() {
+      const layer = layers[front];
+      return layer.dataset.key === currentKey ? layer.querySelector('video') : null;
+    }
+
+    async function restartVisibleVideo() {
+      const v = visibleVideo();
+      if (mode !== 'play' || !v || status.state === 'error') return;
+      if (await startVideo(v)) report({ state: 'playing', detail: null }); // startVideo prüft, ob noch aktuell
+    }
+
+    // -----------------------------------------------------------------------
+    // Modus: play = normal, pause = eingefroren, image = Standbild, dark = schwarz.
+    // Der Inhalt bleibt darunter geladen, damit „Play“ dort weitermacht.
+    // -----------------------------------------------------------------------
+
+    let mode = 'play';
+    let standby = null; // Bildadresse
+    let standbyStyle = null; // { text, font, color, position, edge }
+
+    function applyMode() {
+      const cover = document.getElementById('cover');
+      const hidden = mode === 'image' || mode === 'dark';
+      // Standbild = Bild und/oder Text, nur im Modus „Bild“
+      const look = mode === 'image' ? JSON.stringify({ standby, standbyStyle }) : '';
+      if (cover.dataset.look !== look) {
+        cover.dataset.look = look;
+        cover.replaceChildren();
+        if (mode === 'image') buildStandby(cover);
+      }
+      cover.classList.toggle('on', hidden);
+
+      const v = visibleVideo();
+      if (mode === 'play') restartVisibleVideo();
+      else if (v && !v.paused) {
+        v.pause();
+        report({ state: 'paused', detail: null });
+      }
+      report({ mode });
+    }
+
+    function buildStandby(cover) {
+      const style = standbyStyle ?? {};
+      if (standby) {
+        const img = new Image();
+        img.className = 'fit ' + edgeClass(style.edge);
+        img.onload = () => fitImage(img);
+        img.src = standby;
+        cover.appendChild(img);
+      }
+      if (style.text?.trim()) {
+        const t = document.createElement('div');
+        t.className = 'standby-text pos-' + (style.position || 'center');
+        t.textContent = style.text;
+        t.style.fontFamily = fontFamily(style.font);
+        t.style.color = style.color || '#fff';
+        cover.appendChild(t);
+      }
+    }
+
+    const edgeClass = (edge) => (edge === 'soft' || edge === 'strong' ? 'edge-' + edge : '');
+
+    // Bild so groß wie möglich einpassen, das Element selbst aber genau so groß wie das Bild halten,
+    // damit die weichen Ecken am echten Bildrand liegen (nicht am Rand der schwarzen Balken)
+    function fitImage(img) {
+      if (!img.naturalWidth) return;
+      const scale = Math.min(innerWidth / img.naturalWidth, innerHeight / img.naturalHeight);
+      img.style.width = img.naturalWidth * scale + 'px';
+      img.style.height = img.naturalHeight * scale + 'px';
+    }
+    addEventListener('resize', () => document.querySelectorAll('img.fit').forEach(fitImage));
+
+    function build(item) {
+      if (!item) {
+        const el = document.createElement('div');
+        el.className = 'idle';
+        el.innerHTML = '<h1></h1><p>Kein Inhalt zugewiesen</p>';
+        el.querySelector('h1').textContent = screenName || 'ScreenDeck';
+        return el;
+      }
+      switch (item.type) {
+        case 'image': {
+          const el = new Image();
+          el.src = item.src;
+          return el;
+        }
+        case 'video': {
+          const el = document.createElement('video');
+          // Keine Schleife: am Ende entscheidet der Server, was als Nächstes läuft
+          Object.assign(el, { src: item.src, autoplay: true, muted: true, playsInline: true });
+          el.setAttribute('playsinline', '');
+          return el;
+        }
+        case 'url': {
+          const el = document.createElement('iframe');
+          el.src = item.src;
+          el.allow = 'autoplay; fullscreen';
+          return el;
+        }
+        case 'text': {
+          const el = document.createElement('div');
+          el.className = 'text ' + edgeClass(item.edge);
+          el.style.fontFamily = fontFamily(item.font);
+          el.appendChild(document.createElement('div')).textContent = item.text;
+          if (item.duration > 0 && item.showCountdown) {
+            const cd = el.appendChild(document.createElement('div'));
+            cd.className = 'cd';
+            cd.textContent = fmtCountdown(item.duration);
+          }
+          el.style.background = item.bg;
+          el.style.color = item.color;
+          return el;
+        }
+      }
+      return document.createElement('div');
+    }
+
+    const MEDIA_ERRORS = { 1: 'abgebrochen', 2: 'Netzwerkfehler', 3: 'Dekodierfehler', 4: 'Format nicht unterstützt' };
+    const mediaError = (el) => 'Video-Fehler: ' + (MEDIA_ERRORS[el.error?.code] || 'unbekannt');
+
+    // Wartet, bis der neue Inhalt geladen ist (max. 8 s), damit nicht ins Schwarze überblendet wird
+    function whenReady(el) {
+      return new Promise((resolve) => {
+        const timer = setTimeout(() => resolve({ timeout: true }), 8000);
+        const ok = () => { clearTimeout(timer); resolve({}); };
+        const fail = (error) => { clearTimeout(timer); resolve({ error }); };
+        if (el.tagName === 'IMG') {
+          if (el.complete && el.naturalWidth) ok();
+          else { el.onload = ok; el.onerror = () => fail('Bild konnte nicht geladen werden'); }
+        } else if (el.tagName === 'VIDEO') {
+          el.oncanplay = ok;
+          el.onerror = () => fail(mediaError(el));
+        } else if (el.tagName === 'IFRAME') {
+          el.onload = ok;
+        } else ok();
+      });
+    }
+
+    async function show(item, force = false) {
+      const key = item ? item.id + ':' + item.updatedAt : 'none:' + screenName;
+      if (key === currentKey && !force) return;
+      currentKey = key;
+      const my = ++token;
+      const isCurrent = () => my === token;
+      textTimer = null;
+      report({ itemId: item?.id ?? null, updatedAt: item?.updatedAt ?? null, state: 'loading', detail: null, audio: null });
+
+      const back = layers[1 - front];
+      back.replaceChildren();
+      back.dataset.key = key;
+      const el = build(item);
+      back.appendChild(el);
+      const result = await whenReady(el);
+      if (!isCurrent()) return; // inzwischen kam schon ein neuerer Inhalt
+
+      back.classList.add('visible');
+      const old = layers[front];
+      old.classList.remove('visible');
+      front = 1 - front;
+      setTimeout(() => { if (isCurrent()) old.replaceChildren(); }, 1000);
+
+      if (!item) return report({ state: 'idle' });
+      if (result.error) return report({ state: 'error', detail: result.error });
+
+      if (el.tagName === 'VIDEO') {
+        el.onerror = () => isCurrent() && report({ state: 'error', detail: mediaError(el) });
+        el.onended = () => {
+          if (!isCurrent()) return;
+          if (ws?.readyState !== WebSocket.OPEN) return restartVisibleVideo(); // offline: von vorne
+          sendProgress();
+          send({ type: 'ended', itemId: item.id });
+        };
+        if (mode !== 'play') return report({ state: 'paused', detail: null }); // nicht automatisch starten
+        const started = await startVideo(el);
+        if (isCurrent()) {
+          report(started ? { state: 'playing', detail: null } : { state: 'blocked', detail: 'Autoplay blockiert' });
+        }
+      } else if (result.timeout) {
+        report({ state: 'timeout', detail: 'Laden nicht bestätigt' });
+        // Lädt der Inhalt doch noch, wird das nachgemeldet
+        el.onload = () => isCurrent() && report({ state: 'showing', detail: null });
+        el.onerror = () => isCurrent() && report({ state: 'error', detail: 'Inhalt konnte nicht geladen werden' });
+      } else {
+        report({ state: 'showing', detail: null });
+        if (item.type === 'text' && item.duration > 0) {
+          textTimer = { itemId: item.id, duration: item.duration, elapsed: 0, done: false, cd: el.querySelector('.cd') };
+        }
+      }
+    }
+
+    // -----------------------------------------------------------------------
+    // Texte mit Anzeigedauer: Countdown läuft nur im Modus „Play“
+    // -----------------------------------------------------------------------
+
+    let textTimer = null;
+    let lastTick = performance.now();
+
+    function fmtCountdown(sec) {
+      sec = Math.max(0, Math.ceil(sec));
+      return sec >= 60 ? `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}` : String(sec);
+    }
+
+    setInterval(() => {
+      const now = performance.now();
+      const dt = (now - lastTick) / 1000;
+      lastTick = now;
+      const t = textTimer;
+      if (!t || t.done || mode !== 'play') return;
+      t.elapsed = Math.min(t.duration, t.elapsed + dt);
+      if (t.cd) t.cd.textContent = fmtCountdown(t.duration - t.elapsed);
+      if (t.elapsed < t.duration) return;
+      t.done = true;
+      if (ws?.readyState !== WebSocket.OPEN) { t.elapsed = 0; t.done = false; return; } // offline: von vorne
+      sendProgress();
+      send({ type: 'ended', itemId: t.itemId });
+    }, 250);
+
+    /** Position im Video / Countdown setzen (Klick in der Verwaltung) */
+    function seek(itemId, time) {
+      if (itemId !== status.itemId) return;
+      const v = visibleVideo();
+      if (v && isFinite(v.duration)) {
+        v.currentTime = Math.max(0, Math.min(v.duration - 0.1, time));
+        if (v.paused) restartVisibleVideo(); // z. B. war schon am Ende
+      } else if (textTimer) {
+        textTimer.elapsed = Math.max(0, Math.min(textTimer.duration, time));
+        textTimer.done = false;
+        if (textTimer.cd) textTimer.cd.textContent = fmtCountdown(textTimer.duration - textTimer.elapsed);
+      }
+      sendProgress();
+    }
+
+    // Läuft das sichtbare Video wirklich? (pausiert, hängt, läuft weiter)
+    let lastTime = -1;
+    let stuck = 0;
+    setInterval(() => {
+      const layer = layers[front];
+      const v = layer.querySelector('video');
+      if (!v || v.ended || mode !== 'play' || layer.dataset.key !== currentKey || status.state === 'error' || status.state === 'loading') return;
+      if (v.paused) {
+        const key = currentKey;
+        startVideo(v).then((ok) => {
+          if (key === currentKey) report(ok ? { state: 'playing', detail: null } : { state: 'blocked', detail: 'Autoplay blockiert' });
+        });
+        return;
+      }
+      // Ton war blockiert, inzwischen wurde aber am Gerät getippt -> Ton erneut versuchen
+      if (status.audio === 'blocked' && navigator.userActivation?.hasBeenActive) startVideo(v);
+      if (v.currentTime === lastTime) {
+        if (++stuck >= 2) report({ state: 'stalled', detail: 'Video hängt' });
+      } else {
+        stuck = 0;
+        report({ state: 'playing', detail: null });
+      }
+      lastTime = v.currentTime;
+    }, 2000);
+
+    function send(msg) {
+      if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
+    }
+
+    // Aktuelle Position und Gesamtdauer (Video oder Text mit Anzeigedauer) für die Verwaltung
+    function sendProgress() {
+      const v = visibleVideo();
+      if (v && isFinite(v.duration)) {
+        send({ type: 'progress', itemId: status.itemId, currentTime: v.currentTime, duration: v.duration });
+      } else if (textTimer) {
+        send({ type: 'progress', itemId: textTimer.itemId, currentTime: textTimer.elapsed, duration: textTimer.duration });
+      }
+    }
+    setInterval(sendProgress, 1000);
+
+    let identTimer;
+    function identify(name) {
+      const el = document.getElementById('ident');
+      el.textContent = name;
+      el.classList.add('on');
+      clearTimeout(identTimer);
+      identTimer = setTimeout(() => el.classList.remove('on'), 5000);
+    }
+
+    function connect() {
+      const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+      const qs = new URLSearchParams({ role: 'screen', id: screenId });
+      if (params.get('name')) qs.set('name', params.get('name'));
+      ws = new WebSocket(`${proto}://${location.host}/ws?${qs}`);
+      const statusDot = document.getElementById('status');
+
+      ws.onopen = () => {
+        statusDot.classList.remove('on');
+        report({}, true); // aktuellen Stand nach (Wieder-)Verbindung melden
+      };
+      ws.onmessage = (e) => {
+        const msg = JSON.parse(e.data);
+        if (msg.type === 'show') {
+          screenName = msg.name;
+          document.title = msg.name + ' – ScreenDeck';
+          if (msg.audio) audio = msg.audio;
+          mode = msg.mode ?? 'play';
+          standby = msg.standby;
+          standbyStyle = msg.standbyStyle;
+          applyMode();
+          show(msg.item, msg.force);
+        } else if (msg.type === 'mode') {
+          mode = msg.mode;
+          standby = msg.standby;
+          standbyStyle = msg.standbyStyle;
+          applyMode();
+        } else if (msg.type === 'version') {
+          // Neuer Code auf dem Server: Seite neu laden (nicht bei direkt geöffneter screen.html ohne Kennung)
+          if (msg.version !== PAGE_VERSION && !PAGE_VERSION.startsWith('{{')) location.reload();
+        } else if (msg.type === 'audio') {
+          audio = { enabled: msg.enabled, volume: msg.volume };
+          restartVisibleVideo();
+        } else if (msg.type === 'replay') {
+          const v = visibleVideo();
+          if (v) { v.currentTime = 0; restartVisibleVideo(); }
+          if (textTimer) seek(textTimer.itemId, 0);
+        } else if (msg.type === 'seek') seek(msg.itemId, msg.time);
+        else if (msg.type === 'identify') identify(msg.name);
+        else if (msg.type === 'reload') location.reload();
+        else if (msg.type === 'removed') { screenName = 'Entfernt'; show(null, true); }
+      };
+      ws.onclose = () => {
+        statusDot.classList.add('on');
+        setTimeout(connect, 2000);
+      };
+    }
+
+    // Tippen/Klicken: Vollbild (nur nach Nutzeraktion erlaubt), Ton freischalten, blockiertes Video starten
+    const hint = document.getElementById('hint');
+    setTimeout(() => (hint.style.opacity = 0), 6000);
+    document.addEventListener('click', () => {
+      hint.style.opacity = 0;
+      const el = document.documentElement;
+      if (!document.fullscreenElement) (el.requestFullscreen || el.webkitRequestFullscreen)?.call(el)?.catch?.(() => {});
+      restartVisibleVideo();
+    });
+
+    // Bildschirm wach halten (nur in sicheren Kontexten verfügbar, z. B. https oder localhost)
+    async function keepAwake() {
+      try { await navigator.wakeLock?.request('screen'); } catch {}
+    }
+    document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && keepAwake());
+    keepAwake();
+
+    show(null);
+    connect();
+  </script>
+</body>
+</html>
