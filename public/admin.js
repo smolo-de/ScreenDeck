@@ -25,6 +25,54 @@ async function api(method, url, body) {
   return data;
 }
 
+/**
+ * Eigener Dialog als Overlay statt der Browser-Popups confirm()/prompt().
+ * Erste Zeile = Frage (fett), nach einer Leerzeile die Erklärung. ok = Text des Bestätigungsknopfs,
+ * danger = roter Knopf, input = Vorgabe für ein Eingabefeld (dann Ergebnis = Text oder null, sonst true/false).
+ */
+function ask(message, { ok = 'OK', danger = false, input } = {}) {
+  return new Promise((resolve) => {
+    const tr = (v) => (window.t ? window.t(String(v)) : String(v));
+    const [title, ...rest] = tr(message).split('\n\n');
+    const dlg = document.createElement('dialog');
+    dlg.className = 'dialog ask';
+    dlg.innerHTML = `<h3 class="ask-title"></h3><p class="ask-text"></p>${input !== undefined ? '<input type="text" class="ask-input" spellcheck="false">' : ''}
+      <div class="row dialog-actions"><button class="ask-cancel">Abbrechen</button><button class="ask-ok ${danger ? 'danger-solid' : 'primary'}"></button></div>`;
+    dlg.querySelector('.ask-title').textContent = title;
+    dlg.querySelector('.ask-text').textContent = rest.join('\n\n');
+    dlg.querySelector('.ask-text').hidden = !rest.length;
+    dlg.querySelector('.ask-ok').textContent = tr(ok);
+    const field = dlg.querySelector('.ask-input');
+    if (field) field.value = tr(input);
+    let answered = false;
+    const done = (yes) => {
+      if (answered) return;
+      answered = true;
+      dlg.close();
+      dlg.remove();
+      resolve(field ? (yes ? field.value : null) : yes);
+    };
+    dlg.querySelector('.ask-ok').addEventListener('click', () => done(true));
+    dlg.querySelector('.ask-cancel').addEventListener('click', () => done(false));
+    dlg.addEventListener('cancel', (e) => {
+      e.preventDefault(); // Esc
+      done(false);
+    });
+    dlg.addEventListener('click', (e) => e.target === dlg && done(false)); // Klick neben das Fenster
+    field?.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter') return;
+      e.preventDefault(); // sonst löst die Taste nach dem Schließen den fokussierten Knopf erneut aus
+      done(true);
+    });
+    document.body.appendChild(dlg);
+    dlg.showModal();
+    if (field) {
+      field.focus();
+      field.select();
+    } else dlg.querySelector(danger ? '.ask-cancel' : '.ask-ok').focus(); // bei Löschen nicht versehentlich mit Enter bestätigen
+  });
+}
+
 let toastTimer;
 function toast(text, ms = 2500) {
   const el = $('#toast');
@@ -661,20 +709,33 @@ function render() {
   $('#deleteAllScreens').hidden = !screens.length;
 
   // Steuerung
-  for (const b of document.querySelectorAll('#distribution button')) {
-    b.classList.toggle('active', b.dataset.value === settings.distribution);
-  }
+  // Verteilung: alle gleich / verschieden und Reihenfolge (alte Angabe „random“ = verschieden + Zufall)
+  const same = settings.distribution === 'sync';
+  const shuffle = !!settings.shuffle || settings.distribution === 'random';
+  for (const b of document.querySelectorAll('#distribution button')) b.classList.toggle('active', b.dataset.value === (same ? 'sync' : 'order'));
+  for (const b of document.querySelectorAll('#shuffle button')) b.classList.toggle('active', b.dataset.value === (shuffle ? '1' : '0'));
   const modes = new Set(screens.map(shownMode));
   for (const b of document.querySelectorAll('#allModes button')) {
     b.classList.toggle('active', modes.size === 1 && modes.has(b.dataset.mode));
   }
   $('#autoAdvance').checked = settings.autoAdvance;
   if (document.activeElement !== $('#interval')) $('#interval').value = settings.interval;
-  $('#modeHelp').textContent = {
-    order: 'Der Reihe nach: Screen 1 zeigt Eintrag 1, Screen 2 Eintrag 2 usw. Bei jedem Wechsel rückt die Playlist um eine Position weiter. Fest zugeordnete Screens bleiben unverändert.',
-    random: 'Zufall: Jeder Screen bekommt einen zufälligen Eintrag – möglichst ohne Doppelungen und ohne Wiederholung des vorherigen Inhalts. Fest zugeordnete Screens bleiben unverändert.',
-    sync: 'Alle gleich: Alle Screens zeigen denselben Inhalt der Playlist, Videos starten gemeinsam und laufen synchron. Weiter, Warteschlange und Springen im Video gelten für alle zusammen. Fest zugeordnete Screens bleiben unverändert.',
-  }[settings.distribution];
+  // je Satz ein eigenes Element, damit die Übersetzung jeden Satz einzeln findet
+  const helpParts = [
+    same
+      ? shuffle
+        ? 'Alle gleich, Zufall: Alle Screens zeigen denselben Inhalt, bei jedem Wechsel einen zufälligen Eintrag der Playlist (nicht zweimal hintereinander denselben).'
+        : 'Alle gleich, der Reihe nach: Alle Screens zeigen denselben Inhalt und gehen gemeinsam Eintrag für Eintrag durch die Playlist.'
+      : shuffle
+        ? 'Verschieden, Zufall: Jeder Screen bekommt einen zufälligen Eintrag – möglichst ohne Doppelungen und ohne Wiederholung des vorherigen Inhalts.'
+        : 'Verschieden, der Reihe nach: Screen 1 zeigt Eintrag 1, Screen 2 Eintrag 2 usw. Bei jedem Wechsel rückt die Playlist um eine Position weiter.',
+    same ? 'Videos starten gemeinsam und laufen synchron. Weiter, Warteschlange und Springen im Video gelten für alle zusammen.' : '',
+    'Fest zugeordnete Screens bleiben unverändert.',
+  ].filter(Boolean);
+  if ($('#modeHelp').dataset.parts !== helpParts.join('|')) {
+    $('#modeHelp').dataset.parts = helpParts.join('|');
+    $('#modeHelp').replaceChildren(...helpParts.flatMap((p, i) => [...(i ? [' '] : []), Object.assign(document.createElement('span'), { textContent: p })]));
+  }
   updateCountdown();
 
   // Screens
@@ -828,12 +889,24 @@ function render() {
   $('#scCompact').classList.toggle('active', compactScreens);
   $('#plCompact').classList.toggle('active', compact);
 
+  // Aktuelle Position: Einträge, die gerade auf einem verbundenen Screen zu sehen sind
+  const onAir = (item) => (isViewActive() ? screens.filter((s) => s.currentItemId === item.id && onlineSet.has(s.id)) : []);
+  const liveBadge = (item) => {
+    const on = onAir(item);
+    if (!on.length) return '';
+    const names = on.map((s) => s.name);
+    const text = names.length > 2 ? `${names.length} Screens` : names.join(', ');
+    return `<span class="badge live" title="${esc('Wird gerade angezeigt auf: ' + names.join(', '))}"><i></i>${esc(text)}</span>`;
+  };
+  const liveCount = playlist.filter((i) => onAir(i).length).length;
+  $('#plJumpLive').hidden = !liveCount;
+
   setList(
     $('#playlist'),
     playlist
           .map(
             (i, n) => `
-        <div class="entry ${i.enabled ? '' : 'disabled'} ${selected.has(i.id) ? 'selected' : ''} ${expanded.has(i.id) ? 'expanded' : ''}" data-id="${esc(i.id)}" ${visible(i) ? '' : 'hidden'}>
+        <div class="entry ${i.enabled ? '' : 'disabled'} ${onAir(i).length ? 'live' : ''} ${selected.has(i.id) ? 'selected' : ''} ${expanded.has(i.id) ? 'expanded' : ''}" data-id="${esc(i.id)}" ${visible(i) ? '' : 'hidden'}>
           <span class="lead"><input type="checkbox" class="sel" data-action="select" ${selected.has(i.id) ? 'checked' : ''} title="Auswählen (Shift = Bereich)"><span class="handle" title="Ziehen zum Sortieren">⋮⋮</span></span>
           ${thumb(i)}
           <div class="meta">
@@ -841,6 +914,7 @@ function render() {
             <div class="sub">
               <span>#${n + 1}</span>
               <span class="badge">${TYPE_LABEL[i.type] ?? i.type}</span>
+              ${liveBadge(i)}
               ${dupBadge(i)}
               ${i.type === 'url' ? `<a class="now" href="${esc(i.src)}" target="_blank" rel="noopener">${esc(i.src)}</a>` : ''}
             </div>
@@ -999,7 +1073,8 @@ $('#musicList').addEventListener('click', (e) => {
   const id = btn.closest('.entry').dataset.id;
   const item = state.music.items.find((i) => i.id === id);
   if (btn.dataset.action === 'mu-play') api('POST', '/api/music/play', { id });
-  if (btn.dataset.action === 'mu-delete' && confirm(`„${item?.title}“ aus der Musikliste entfernen?`)) api('DELETE', `/api/music/items/${id}`);
+  if (btn.dataset.action === 'mu-delete')
+    ask(`„${item?.title}“ aus der Musikliste entfernen?`, { ok: 'Entfernen', danger: true }).then((yes) => yes && api('DELETE', `/api/music/items/${id}`));
 });
 $('#musicList').addEventListener('change', (e) => {
   if (e.target.dataset.action === 'mu-rename') api('PATCH', `/api/music/items/${e.target.closest('.entry').dataset.id}`, { title: e.target.value });
@@ -1095,7 +1170,7 @@ $('#plActivate').addEventListener('click', async () => {
   toast(`„${view.name}“ läuft jetzt auf den Screens`);
 });
 $('#plNew').addEventListener('click', async () => {
-  const name = prompt('Name der neuen Playlist:', 'Neue Playlist');
+  const name = await ask('Name der neuen Playlist:', { ok: 'Anlegen', input: 'Neue Playlist' });
   if (name === null) return;
   const p = await api('POST', '/api/playlists', { name });
   selectPlaylist(p.id);
@@ -1103,7 +1178,7 @@ $('#plNew').addEventListener('click', async () => {
 });
 $('#plCopy').addEventListener('click', async () => {
   const view = viewPlaylist();
-  const name = prompt('Name der Kopie:', `${view.name} (Kopie)`);
+  const name = await ask('Name der Kopie:', { ok: 'Duplizieren', input: `${view.name} (Kopie)` });
   if (name === null) return;
   const p = await api('POST', '/api/playlists', { name, copyFrom: view.id });
   selectPlaylist(p.id);
@@ -1111,13 +1186,13 @@ $('#plCopy').addEventListener('click', async () => {
 });
 $('#plRename').addEventListener('click', async () => {
   const view = viewPlaylist();
-  const name = prompt('Neuer Name:', view.name);
+  const name = await ask('Neuer Name:', { ok: 'Umbenennen', input: view.name });
   if (name?.trim()) await api('PATCH', `/api/playlists/${view.id}`, { name });
 });
 $('#plDelete').addEventListener('click', async () => {
   const view = viewPlaylist();
   const live = view.id === state.activePlaylistId;
-  if (!confirm(`Playlist „${view.name}“ mit ${view.count} Einträgen löschen?${live ? '\n\nSie läuft gerade – danach spielen die Screens die erste andere Playlist.' : ''}\n\nDateien bleiben erhalten, solange eine andere Playlist sie verwendet.`)) return;
+  if (!await ask(`Playlist „${view.name}“ mit ${view.count} Einträgen löschen?${live ? '\n\nSie läuft gerade – danach spielen die Screens die erste andere Playlist.' : ''}\n\nDateien bleiben erhalten, solange eine andere Playlist sie verwendet.`, { ok: 'Löschen', danger: true })) return;
   await api('DELETE', `/api/playlists/${view.id}`);
   viewPlaylistId = null;
   toast(`„${view.name}“ gelöscht`);
@@ -1187,7 +1262,7 @@ $('#plSelectAll').addEventListener('change', (e) => {
 async function bulk(action) {
   const ids = [...selected];
   if (!ids.length) return;
-  if (action === 'delete' && !confirm(`${ids.length} Einträge aus der Playlist löschen?`)) return;
+  if (action === 'delete' && !(await ask(`${ids.length} Einträge aus der Playlist löschen?`, { ok: 'Löschen', danger: true }))) return;
   const { count } = await api('POST', '/api/playlist/bulk', { ids, action });
   if (action === 'delete') selected.clear();
   toast(`${count} Einträge ${{ enable: 'aktiviert', disable: 'deaktiviert', delete: 'gelöscht' }[action]}`);
@@ -1442,7 +1517,8 @@ $('#screens').addEventListener('click', (e) => {
     const zero = (screen.musicVolume ?? 100) === 0;
     api('PATCH', `/api/screens/${id}`, screen.music && screen.musicMuted ? { musicMuted: false, ...(zero && { musicVolume: 50 }) } : { music: !screen.music });
   }
-  if (btn.dataset.action === 'delete-screen' && confirm('Diesen Screen aus der Liste entfernen?')) api('DELETE', `/api/screens/${id}`);
+  if (btn.dataset.action === 'delete-screen')
+    ask('Diesen Screen aus der Liste entfernen?', { ok: 'Entfernen', danger: true }).then((yes) => yes && api('DELETE', `/api/screens/${id}`));
 });
 
 $('#playlist').addEventListener('change', (e) => {
@@ -1462,8 +1538,8 @@ $('#playlist').addEventListener('click', async (e) => {
   const id = btn.closest('.entry').dataset.id;
   const item = itemById(id);
 
-  if (btn.dataset.action === 'delete-item' && confirm(`„${item?.title}“ aus der Playlist löschen?`)) {
-    api('DELETE', `/api/playlist/${id}`);
+  if (btn.dataset.action === 'delete-item') {
+    ask(`„${item?.title}“ aus der Playlist löschen?`, { ok: 'Löschen', danger: true }).then((yes) => yes && api('DELETE', `/api/playlist/${id}`));
   }
   if (btn.dataset.action === 'quick') enqueue(btn.dataset.screen, id);
   if (btn.dataset.action === 'expand') {
@@ -1505,9 +1581,25 @@ $('#distribution').addEventListener('click', (e) => {
   const value = e.target.closest('button')?.dataset.value;
   if (value) api('PATCH', '/api/settings', { distribution: value });
 });
+$('#shuffle').addEventListener('click', (e) => {
+  const value = e.target.closest('button')?.dataset.value;
+  if (value) api('PATCH', '/api/settings', { shuffle: value === '1' });
+});
 $('#autoAdvance').addEventListener('change', (e) => api('PATCH', '/api/settings', { autoAdvance: e.target.checked }));
 $('#interval').addEventListener('change', (e) => api('PATCH', '/api/settings', { interval: Number(e.target.value) }));
 $('#next').addEventListener('click', () => api('POST', '/api/next'));
+// Zur aktuellen Position springen; weitere Klicks gehen reihum durch alle gerade angezeigten Einträge
+let jumpLive = 0;
+$('#plJumpLive').addEventListener('click', () => {
+  const live = [...document.querySelectorAll('#playlist .entry.live:not([hidden])')];
+  if (!live.length) return toast('Kein angezeigter Eintrag in der aktuellen Ansicht (Filter?)');
+  if ($('#playlistCard').classList.contains('collapsed')) $('#playlistCard .collapse-btn').click();
+  const el = live[jumpLive++ % live.length];
+  el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  el.classList.remove('flash');
+  void el.offsetWidth; // Animation neu starten
+  el.classList.add('flash');
+});
 $('#duplicates').addEventListener('change', (e) => api('PATCH', '/api/settings', { duplicates: e.target.value }));
 
 // ---------------------------------------------------------------------------
@@ -1652,14 +1744,14 @@ $('#mbSource').addEventListener('change', (e) => {
   loadMedia('');
 });
 $('#mbRefresh').addEventListener('click', () => loadMedia());
-$('#mbAddAll').addEventListener('click', () => {
+$('#mbAddAll').addEventListener('click', async () => {
   const q = $('#mbSearch').value.trim().toLowerCase();
   const inPlaylist = playlistKeys();
   const inMusic = musicKeys();
   const shown = mbData.files.filter((f) => !q || f.name.toLowerCase().includes(q));
   const paths = shown.filter((f) => f.type !== 'audio' && !inPlaylist.has(f.key)).map((f) => f.path);
   const audio = shown.filter((f) => f.type === 'audio' && !inMusic.has(f.key)).map((f) => f.path);
-  if (paths.length + audio.length > 20 && !confirm(`${paths.length + audio.length} Dateien hinzufügen?${audio.length ? `\n(${audio.length} Audiodateien in die Musikliste)` : ''}`)) return;
+  if (paths.length + audio.length > 20 && !(await ask(`${paths.length + audio.length} Dateien hinzufügen?${audio.length ? `\n\n${audio.length} Audiodateien kommen in die Musikliste.` : ''}`, { ok: 'Hinzufügen' }))) return;
   if (paths.length) addMediaItems(paths);
   if (audio.length) addMusicFiles(audio);
 });
@@ -1771,11 +1863,37 @@ $('#textForm').addEventListener('submit', async (e) => {
 // Einstellungen: PIN für Verwaltung und Screens
 // ---------------------------------------------------------------------------
 
+// Einstellungen als Overlay (natives <dialog>: Hintergrund abgedunkelt, Esc schließt)
+const settingsDlg = $('#settingsCard');
 function toggleSettings(open) {
-  $('#settingsCard').hidden = !open;
-  if (open) loadCacheInfo();
+  if (open && !settingsDlg.open) {
+    settingsDlg.showModal();
+    loadCacheInfo();
+    loadInfo(); // Port-Status aktuell anzeigen
+  } else if (!open && settingsDlg.open) settingsDlg.close();
   $('#settingsBtn').classList.toggle('active', open);
-  if (open) $('#settingsCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+settingsDlg.addEventListener('close', () => $('#settingsBtn').classList.remove('active'));
+// Klick neben das Fenster schließt
+settingsDlg.addEventListener('click', (e) => e.target === settingsDlg && toggleSettings(false));
+
+// Rubriken: eine sichtbar, die zuletzt gewählte merkt sich der Browser
+function showSettingsPane(name) {
+  if (!$(`.set-pane[data-pane="${name}"]`)) name = 'screens';
+  for (const b of document.querySelectorAll('#setNav button')) b.classList.toggle('on', b.dataset.pane === name);
+  for (const p of document.querySelectorAll('.set-pane')) p.hidden = p.dataset.pane !== name;
+  try {
+    localStorage.setItem('screendeck-settings-pane', name);
+  } catch {}
+}
+$('#setNav').addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-pane]');
+  if (b) showSettingsPane(b.dataset.pane);
+});
+try {
+  showSettingsPane(localStorage.getItem('screendeck-settings-pane') || 'screens');
+} catch {
+  showSettingsPane('screens');
 }
 // Zwischenspeicher der verkleinerten Bilder
 const fmtBytes = (b) => (b >= 1e9 ? (b / 1e9).toFixed(2) + ' GB' : b >= 1e6 ? (b / 1e6).toFixed(1) + ' MB' : b >= 1e3 ? Math.round(b / 1e3) + ' KB' : b + ' Byte');
@@ -1788,13 +1906,13 @@ async function loadCacheInfo() {
 }
 $('#cacheRefresh').addEventListener('click', loadCacheInfo);
 $('#cacheClear').addEventListener('click', async () => {
-  if (!confirm('Zwischenspeicher leeren?\n\nDie verkleinerten Bilder werden gelöscht und beim nächsten Abruf neu erzeugt. Originaldateien bleiben unverändert.')) return;
+  if (!await ask('Zwischenspeicher leeren?\n\nDie verkleinerten Bilder werden gelöscht und beim nächsten Abruf neu erzeugt. Originaldateien bleiben unverändert.', { ok: 'Leeren', danger: true })) return;
   const r = await api('DELETE', '/api/cache');
   toast(`Zwischenspeicher geleert: ${r.removed} Bilder, ${fmtBytes(r.freed)} freigegeben`);
   loadCacheInfo();
 });
 
-$('#settingsBtn').addEventListener('click', () => toggleSettings($('#settingsCard').hidden));
+$('#settingsBtn').addEventListener('click', () => toggleSettings(!settingsDlg.open));
 $('#settingsClose').addEventListener('click', () => toggleSettings(false));
 
 function renderSecurity() {
@@ -1822,17 +1940,29 @@ function renderSecurity() {
 }
 
 // Medienquellen in den Einstellungen
+const isNetPath = (p) => /^\\\\|^\/\//.test(p ?? '');
+const authOpen = new Set(); // Quellen mit aufgeklappter Anmeldung
 function renderSources() {
   setHtml(
     $('#msList'),
     mediaSources()
       .map(
         (m) => `
-      <div class="ms-row" data-id="${esc(m.id)}">
-        <span class="ms-icon">${/^\\\\|^\/\//.test(m.path) ? '🖧' : '📁'}</span>
+      <div class="ms-row ${authOpen.has(m.id) ? 'auth-open' : ''}" data-id="${esc(m.id)}">
+        <span class="ms-icon">${isNetPath(m.path) ? '🖧' : '📁'}</span>
         <input type="text" class="ms-name" value="${esc(m.name)}" data-action="ms-rename" title="Name ändern">
-        <code class="ms-path" title="${esc(m.path)}">${esc(m.path)}</code>
-        <button class="icon danger" data-action="ms-remove" title="Quelle entfernen (Dateien bleiben unberührt)">✕</button>
+        <code class="ms-path" title="${esc(m.path)}">${esc(m.path)}${m.auth ? ` <span class="ms-user" title="Anmeldung an der Freigabe">🔑 ${esc(m.auth.user)}</span>` : ''}</code>
+        <span class="ms-btns">
+          ${isNetPath(m.path) ? `<button class="icon ${m.auth ? 'on' : ''}" data-action="ms-auth" title="Anmeldung an der Freigabe (Benutzer, Kennwort)">🔑</button>` : ''}
+          <button class="icon danger" data-action="ms-remove" title="Quelle entfernen (Dateien bleiben unberührt)">✕</button>
+        </span>
+        ${authOpen.has(m.id) ? `
+        <div class="ms-auth">
+          <input type="text" data-field="user" placeholder="Benutzer, z. B. NAS\\max" value="${esc(m.auth?.user ?? '')}" autocomplete="off" spellcheck="false">
+          <input type="password" data-field="password" placeholder="${m.auth ? 'Kennwort (neu eingeben)' : 'Kennwort'}" autocomplete="new-password">
+          <button class="small primary" data-action="ms-auth-save">Anmelden</button>
+          ${m.auth ? '<button class="small danger" data-action="ms-auth-clear">Entfernen</button>' : ''}
+        </div>` : ''}
       </div>`
       )
       .join('') || '<p class="help small">Keine Medienquelle eingebunden – nur hochgeladene Dateien.</p>'
@@ -1843,11 +1973,14 @@ async function addSource() {
   if (!path) return toast('Bitte einen Pfad eingeben');
   $('#msAdd').disabled = true;
   $('#msAdd').textContent = 'Prüfe…'; // Netzlaufwerke können etwas dauern
-  const source = await api('POST', '/api/media-sources', { name: $('#msName').value.trim(), path }).catch(() => null);
+  const cred = isNetPath(path) && $('#msUser').value.trim() ? { user: $('#msUser').value.trim(), password: $('#msPass').value } : {};
+  const source = await api('POST', '/api/media-sources', { name: $('#msName').value.trim(), path, ...cred }).catch(() => null);
   $('#msAdd').disabled = false;
   $('#msAdd').textContent = 'Einbinden';
   if (!source) return;
-  $('#msName').value = $('#msPath').value = '';
+  $('#msName').value = $('#msPath').value = $('#msUser').value = $('#msPass').value = '';
+  $('#msCred').hidden = true;
+  $('#msBrowser').hidden = true;
   toast(`„${source.name}“ eingebunden`);
   mbSource = source.id;
   try {
@@ -1857,16 +1990,95 @@ async function addSource() {
 }
 $('#msAdd').addEventListener('click', addSource);
 $('#msPath').addEventListener('keydown', (e) => e.key === 'Enter' && addSource());
+$('#msPass').addEventListener('keydown', (e) => e.key === 'Enter' && addSource());
+// Anmeldefelder nur bei Netzwerkpfaden
+const updateCred = () => ($('#msCred').hidden = !isNetPath($('#msPath').value.trim()));
+$('#msPath').addEventListener('input', updateCred);
+
+// Ordner-Browser: Laufwerke bzw. \\Server → Freigaben → Ordner durchklicken, der Pfad landet im Feld
+const isServerOnly = (p) => /^\\\\[^\\]+\\?$/.test(p ?? '');
+const BROWSE_ICON = { drive: '💽', share: '🖧', folder: '📁' };
+let browseBusy = false;
+async function browse(p) {
+  if (browseBusy) return;
+  browseBusy = true;
+  $('#msBrowser').hidden = false;
+  setHtml($('#msDirs'), '<p class="help small">Lade…</p>');
+  const user = $('#msUser').value.trim();
+  const cred = isNetPath(p) && user ? { user, password: $('#msPass').value } : {};
+  const r = await api('POST', '/api/browse', { path: p, ...cred }).catch(() => null);
+  browseBusy = false;
+  if (!r) return setHtml($('#msDirs'), ''); // Fehler zeigt api() als Meldung
+  $('#msCur').translate = !r.path; // Pfade nicht übersetzen, „Laufwerke“ schon
+  $('#msCur').textContent = r.path || 'Laufwerke';
+  $('#msUp').disabled = r.parent === null || r.parent === undefined;
+  $('#msUp').dataset.path = r.parent ?? '';
+  $('#msPick').disabled = !r.path || isServerOnly(r.path); // Server selbst ist kein Ordner
+  if (r.path) {
+    $('#msPath').value = r.path;
+    updateCred();
+  }
+  setHtml(
+    $('#msDirs'),
+    r.entries.length
+      ? r.entries.map((e) => `<button class="ms-dir" data-path="${esc(e.path)}" title="${esc(e.path)}"><span>${BROWSE_ICON[e.kind] ?? '📁'}</span><span translate="no">${esc(e.name)}</span></button>`).join('')
+      : `<p class="help small">${r.path ? (isServerOnly(r.path) ? 'Keine Freigaben gefunden' : 'Keine Unterordner – diesen Ordner wählen oder zurück') : 'Keine Laufwerke gefunden'}</p>`
+  );
+}
+$('#msBrowse').addEventListener('click', () => browse($('#msPath').value.trim()));
+$('#msDirs').addEventListener('click', (e) => {
+  const b = e.target.closest('.ms-dir');
+  if (b) browse(b.dataset.path);
+});
+$('#msUp').addEventListener('click', () => browse($('#msUp').dataset.path));
+$('#msBrowseClose').addEventListener('click', () => ($('#msBrowser').hidden = true));
+$('#msPick').addEventListener('click', () => {
+  // Pfad steht schon im Feld; Name vorschlagen, Browser schließen
+  const p = $('#msPath').value.replace(/[\\/]+$/, '');
+  if (!$('#msName').value.trim()) $('#msName').value = p.split(/[\\/]/).pop() || p;
+  $('#msBrowser').hidden = true;
+  $('#msAdd').focus();
+});
 $('#msList').addEventListener('change', (e) => {
   if (e.target.dataset.action === 'ms-rename') api('PATCH', `/api/media-sources/${e.target.closest('.ms-row').dataset.id}`, { name: e.target.value });
 });
-$('#msList').addEventListener('click', (e) => {
-  if (e.target.dataset.action !== 'ms-remove') return;
+$('#msList').addEventListener('click', async (e) => {
+  const action = e.target.closest('button')?.dataset.action;
   const row = e.target.closest('.ms-row');
+  if (!row) return;
+  const id = row.dataset.id;
+  if (action === 'ms-auth') {
+    // Anmeldung auf-/zuklappen
+    authOpen.has(id) ? authOpen.delete(id) : authOpen.add(id);
+    renderSources();
+    $(`#msList .ms-row[data-id="${CSS.escape(id)}"] [data-field=user]`)?.focus();
+    return;
+  }
+  if (action === 'ms-auth-save' || action === 'ms-auth-clear') {
+    const user = action === 'ms-auth-clear' ? '' : row.querySelector('[data-field=user]').value.trim();
+    if (action === 'ms-auth-save' && !user) return toast('Bitte einen Benutzer eingeben');
+    const btn = e.target.closest('button');
+    btn.disabled = true;
+    btn.textContent = action === 'ms-auth-save' ? 'Prüfe…' : '…';
+    const ok = await api('PATCH', `/api/media-sources/${id}`, { user, password: row.querySelector('[data-field=password]')?.value ?? '' }).catch(() => null);
+    btn.disabled = false;
+    if (!ok) return renderSources();
+    authOpen.delete(id);
+    toast(user ? `Angemeldet als „${user}“` : 'Anmeldung entfernt');
+    renderSources();
+    if (mbSource === id) loadMedia(mbData?.dir ?? '');
+    return;
+  }
+  if (action !== 'ms-remove') return;
   const name = row.querySelector('.ms-name').value;
-  if (confirm(`Medienquelle „${name}“ entfernen?\n\nDie Dateien im Ordner bleiben unberührt, Einträge in der Playlist auch.`)) {
+  if (await ask(`Medienquelle „${name}“ entfernen?\n\nDie Dateien im Ordner bleiben unberührt, Einträge in der Playlist auch.`, { ok: 'Entfernen', danger: true })) {
     api('DELETE', `/api/media-sources/${row.dataset.id}`);
   }
+});
+$('#pairRenew').addEventListener('click', async () => {
+  if (!await ask('Neuen Kopplungs-Code erzeugen?\n\nDer bisherige QR-Code funktioniert danach nicht mehr. Bereits gekoppelte Smartphones bleiben freigeschaltet.', { ok: 'Neuer Code' })) return;
+  await api('POST', '/api/pair-key');
+  toast('Neuer Kopplungs-Code erzeugt');
 });
 $('#screenMenu').addEventListener('change', (e) => api('PATCH', '/api/settings', { screenMenu: e.target.checked }));
 $('#touchZoom').addEventListener('change', (e) => api('PATCH', '/api/settings', { touchZoom: e.target.checked }));
@@ -1891,12 +2103,12 @@ $('#settingsCard').addEventListener('click', async (e) => {
   if (btn.classList.contains('save')) {
     const pin = input.value.trim();
     if (pin.length < 4) return toast('Die PIN muss mindestens 4 Zeichen lang sein');
-    if (role === 'admin' && !confirm(`PIN für die Verwaltung auf „${pin}“ setzen?\n\nBitte notieren – ohne sie kommst du nicht mehr in die Verwaltung.`)) return;
+    if (role === 'admin' && !(await ask(`PIN für die Verwaltung auf „${pin}“ setzen?\n\nBitte notieren – ohne sie kommst du nicht mehr in die Verwaltung.`, { ok: 'PIN setzen' }))) return;
     await api('PUT', '/api/security', { role, pin });
     input.value = '';
     toast(`PIN für ${SEC_LABEL[role]} gespeichert: ${pin}`, 8000);
   }
-  if (btn.classList.contains('clear') && confirm(`PIN für ${SEC_LABEL[role]} entfernen? Danach ist der Bereich ohne PIN erreichbar.`)) {
+  if (btn.classList.contains('clear') && (await ask(`PIN für ${SEC_LABEL[role]} entfernen?\n\nDanach ist der Bereich ohne PIN erreichbar.`, { ok: 'Entfernen', danger: true }))) {
     await api('PUT', '/api/security', { role, pin: '' });
     toast(`Schutz für ${SEC_LABEL[role]} aufgehoben`);
   }
@@ -1904,7 +2116,7 @@ $('#settingsCard').addEventListener('click', async (e) => {
 
 $('#deleteAllScreens').addEventListener('click', async () => {
   const n = state.screens.length;
-  if (!confirm(`Alle ${n} Screens aus der Liste entfernen?\n\nNamen, Einstellungen und Verlauf gehen verloren. Gerade verbundene Screens melden sich danach automatisch neu an.`)) return;
+  if (!await ask(`Alle ${n} Screens aus der Liste entfernen?\n\nNamen, Einstellungen und Verlauf gehen verloren. Gerade verbundene Screens melden sich danach automatisch neu an.`, { ok: 'Alle entfernen', danger: true })) return;
   const { count } = await api('DELETE', '/api/screens');
   toast(`${count} Screens entfernt`);
 });
@@ -1966,7 +2178,33 @@ dz.addEventListener('drop', (e) => {
 // Start
 // ---------------------------------------------------------------------------
 
-// Einklappbare Bereiche (Hinzufügen, Medien, Musik): Klick auf die Kopfzeile, den Zustand merkt sich der Browser
+// Höhe der Kopfzeile für die darunter stehen bleibende Steuerung
+const noteTopbar = () => document.documentElement.style.setProperty('--topbar-h', $('.topbar').offsetHeight + 'px');
+noteTopbar();
+addEventListener('resize', noteTopbar);
+
+// Erklärung zur Verteilung nur auf Wunsch (ⓘ), der Browser merkt sich die Wahl
+{
+  const btn = $('#modeHelpBtn');
+  const apply = (open) => {
+    $('#modeHelp').hidden = !open;
+    btn.setAttribute('aria-expanded', String(open));
+  };
+  let open = false;
+  try {
+    open = localStorage.getItem('screendeck-mode-help') === '1';
+  } catch {}
+  apply(open);
+  btn.addEventListener('click', () => {
+    open = !open;
+    apply(open);
+    try {
+      localStorage.setItem('screendeck-mode-help', open ? '1' : '0');
+    } catch {}
+  });
+}
+
+// Einklappbare Bereiche (Hinzufügen, Medien, Musik, Playlist): Klick auf die Kopfzeile, den Zustand merkt sich der Browser
 for (const card of document.querySelectorAll('.card.collapsible')) {
   const key = 'screendeck-collapsed-' + card.dataset.collapse;
   const head = card.querySelector('.card-head');
@@ -2011,14 +2249,55 @@ function showScreenUrls() {
   ];
   setHtml($('#screenUrls'), urls.map((u) => `<code>${esc(u)}</code>`).join(' '));
 }
-fetch('/api/info')
-  .then((r) => r.json())
-  .then(({ port, shortPort, addresses }) => {
-    screenPort = shortPort ?? port;
-    screenAddresses = addresses;
-    $('#hostNameSuffix').textContent = `.local${portSuffix()}`;
-    showScreenUrls();
-  });
+// Adressen und Ports vom Server; nach Änderungen an den Ports erneut abrufen
+async function loadInfo() {
+  const info = await fetch('/api/info')
+    .then((r) => r.json())
+    .catch(() => null);
+  if (!info) return;
+  screenPort = info.shortPort ?? info.port;
+  screenAddresses = info.addresses;
+  $('#hostNameSuffix').textContent = `.local${portSuffix()}`;
+  showScreenUrls();
+  renderPorts(info);
+}
+
+// ⚙ Einstellungen → Netzwerk → Ports: eingestellte Werte und was gerade läuft
+function renderPorts({ port, ports: p }) {
+  if (!p) return;
+  if (document.activeElement !== $('#portMain')) $('#portMain').value = p.port;
+  if (document.activeElement !== $('#portExtra')) $('#portExtra').value = p.extraPort;
+  $('#portMain').disabled = p.portFromEnv;
+  $('#portExtra').disabled = p.extraFromEnv;
+  const status = (el, cls, text) => {
+    el.className = 'port-status ' + cls;
+    el.textContent = text;
+  };
+  if (p.portFromEnv) status($('#portStatus'), '', `Festgelegt durch die Umgebungsvariable PORT (${port}).`);
+  else if (p.restartNeeded) status($('#portStatus'), 'warn', `⚠ Läuft noch auf ${port} – ${p.port} gilt nach einem Neustart des Servers.`);
+  else status($('#portStatus'), 'ok', `✓ Läuft auf Port ${port}`);
+  const x = p.extra;
+  $('#portExtra').title = p.extraFromEnv ? 'Festgelegt durch die Umgebungsvariable EXTRA_PORT' : '';
+  if (!p.extraPort) status($('#extraStatus'), '', `Aus – Adressen mit :${port}`);
+  else if (p.extraPort === port) status($('#extraStatus'), '', 'Gleich dem Hauptport – kein zusätzlicher Port nötig.');
+  else if (x?.ok) status($('#extraStatus'), 'ok', x.port === 80 ? '✓ Aktiv – Adressen ohne Portangabe' : `✓ Aktiv – Adressen mit :${x.port}`);
+  else if (x?.error) {
+    const why = x.error === 'EADDRINUSE' ? 'ist schon belegt' : x.error === 'EACCES' ? 'ist nicht erlaubt (Berechtigung)' : x.error;
+    status($('#extraStatus'), 'warn', `⚠ Port ${x.port} ${why} – Adressen laufen über :${port}. Anderen Port wählen, z. B. 8080.`);
+  }
+}
+
+async function savePort(field, input) {
+  const value = Number(input.value);
+  input.disabled = true;
+  await api('PATCH', '/api/settings', { [field]: value }).catch(() => null);
+  input.disabled = false;
+  await loadInfo();
+}
+$('#portMain').addEventListener('change', (e) => savePort('port', e.target));
+$('#portExtra').addEventListener('change', (e) => savePort('extraPort', e.target));
+
+loadInfo();
 
 // Zeitabhängige Anzeigen ("zuletzt vor 3 Min.", "wird übertragen…") aktuell halten
 setInterval(() => !isBusy() && render(), 5000);

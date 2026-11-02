@@ -165,11 +165,85 @@
     body.remote-ctrl { cursor: default; }
     #remoteBar .rb-sep { width: 1px; align-self: stretch; margin: 6px 0; background: rgba(255,255,255,.15); }
     #remoteBar button.on { background: #f59e0b; border-color: #fbbf24; color: #111; }
+    #remoteBar { flex-wrap: wrap; justify-content: center; }
+    #remoteBar .rb-break { display: none; }
     @media (max-width: 560px) {
       #remoteBar { gap: 5px; padding: 6px; }
       #remoteBar button { width: 42px; height: 42px; border-radius: 12px; }
       #remoteBar .rb-info { display: none; }
+      /* Smartphone: zwei Zeilen – oben Steuern, Playlist, Hochladen; unten Werkzeuge */
+      #remoteBar { width: calc(100vw - 24px); box-sizing: border-box; }
+      #remoteBar .rb-break { display: block; flex-basis: 100%; height: 0; }
+      #remoteBar .rb-sep { display: none; }
     }
+    /* Felder über der Leiste: Abstand nach deren Höhe (am Smartphone zwei Zeilen) */
+    #soundBar, #penBar, #listBar { bottom: calc(max(12px, env(safe-area-inset-bottom)) + var(--rb-h, 68px) + 10px) !important; }
+    /* Playlist mit Vorschaubildern */
+    #listBar { position: fixed; left: 50%; transform: translateX(-50%); z-index: 15; display: grid; gap: 8px; padding: 10px 12px 12px;
+      width: min(680px, calc(100vw - 24px)); box-sizing: border-box; border-radius: 16px; color: #f3f4f6;
+      background: rgba(22, 24, 30, .9); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
+      border: 1px solid rgba(255,255,255,.14); box-shadow: 0 8px 24px rgba(0,0,0,.4); }
+    #listBar[hidden] { display: none; }
+    .lb-head { display: flex; align-items: center; gap: 8px; font-size: 14px; min-width: 0; }
+    .lb-select { flex: 1; min-width: 0; height: 36px; padding: 0 8px; border-radius: 10px; font: inherit; font-weight: 600; color: #fff;
+      background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.16); text-overflow: ellipsis; }
+    .lb-select option { background: #1f2937; color: #fff; }
+    .lb-count { color: #9ca3af; font-size: 12.5px; white-space: nowrap; }
+    .lb-head button, .lb-newform button { height: 36px; padding: 0 12px; border-radius: 10px; font: inherit; font-size: 14px; font-weight: 600; cursor: pointer;
+      color: #fff; background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.16); white-space: nowrap; }
+    .lb-newform { display: flex; gap: 6px; }
+    .lb-newform[hidden] { display: none; }
+    .lb-newname { flex: 1; min-width: 0; height: 36px; padding: 0 10px; border-radius: 10px; font: inherit; color: #fff;
+      background: rgba(255,255,255,.08); border: 1px solid #3b82f6; outline: none; }
+    .lb-newform .lb-ok { background: #2563eb; border-color: #3b82f6; }
+    .lb-scroll { max-height: min(46vh, 420px); overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; border-radius: 9px; }
+    .lb-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 6px; }
+    /* Höhe über einen Platzhalter (16:10) statt aspect-ratio – das kennen ältere Safari/Android-Browser auf Knöpfen nicht,
+       dann fielen die Kacheln zusammen und die Bilder lagen übereinander */
+    .lb-item { position: relative; display: block; width: 100%; height: auto; padding: 0; overflow: hidden; border-radius: 9px;
+      cursor: pointer; color: #fff; background: #1f2937; border: 2px solid transparent; font: inherit; -webkit-appearance: none; appearance: none; }
+    .lb-item::before { content: ''; display: block; padding-top: 62.5%; }
+    .lb-item img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
+    .lb-empty { padding: 18px 8px; text-align: center; color: #9ca3af; font-size: 14px; }
+    /* Löschmodus */
+    .lb-head .lb-del { padding: 0 10px; }
+    #listBar.del-mode .lb-del { background: #dc2626; border-color: #f87171; }
+    .lb-delbar { display: flex; align-items: center; gap: 6px; }
+    .lb-delbar[hidden] { display: none; }
+    .lb-delhint { flex: 1; min-width: 0; font-size: 13px; color: #fca5a5; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .lb-delbar button { height: 34px; padding: 0 11px; border-radius: 10px; font: inherit; font-size: 13.5px; font-weight: 600; cursor: pointer; color: #fff;
+      background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.16); white-space: nowrap; }
+    .lb-delbar .lb-delgo { background: #dc2626; border-color: #f87171; }
+    .lb-delbar .lb-delgo:disabled { opacity: .4; }
+    #listBar.del-mode .lb-item::after { content: '✕'; position: absolute; top: 4px; right: 4px; width: 20px; height: 20px; display: grid; place-items: center;
+      border-radius: 50%; font-size: 11px; background: rgba(0,0,0,.6); color: #fff; }
+    #listBar.del-mode .lb-item.sel { border-color: #ef4444; }
+    #listBar.del-mode .lb-item.sel::after { background: #ef4444; content: '✓'; }
+    #listBar.del-mode .lb-item.sel img, #listBar.del-mode .lb-item.sel .lb-t { opacity: .45; }
+    #listBar.del-mode .lb-item.on { box-shadow: none; }
+    /* Rückfrage */
+    #lbAsk { margin: auto; box-sizing: border-box; width: min(380px, calc(100vw - 40px)); padding: 20px; border-radius: 16px; color: #f3f4f6; background: #1b1e25;
+      border: 1px solid rgba(255,255,255,.16); box-shadow: 0 20px 50px rgba(0,0,0,.5); font-size: 15px; }
+    #lbAsk::backdrop { background: rgba(0,0,0,.55); }
+    #lbAsk .ask-q { margin: 0 0 8px; font-weight: 600; font-size: 16px; }
+    #lbAsk .ask-note { margin: 0; color: #9ca3af; font-size: 13px; }
+    #lbAsk .ask-btns { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
+    #lbAsk button { height: 40px; padding: 0 16px; border-radius: 10px; font: inherit; font-weight: 600; cursor: pointer; color: #fff;
+      background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.16); }
+    #lbAsk button.danger { background: #dc2626; border-color: #f87171; }
+    #remoteBar button.hint { animation: rbhint 1.2s ease-in-out 3; }
+    @keyframes rbhint { 50% { background: #2563eb; border-color: #93c5fd; transform: scale(1.08); } }
+    .lb-item .lb-t { position: absolute; inset: 0; display: grid; place-items: center; padding: 4px; font-size: 11px; line-height: 1.2; text-align: center;
+      overflow: hidden; word-break: break-word; }
+    .lb-item .lb-type { position: absolute; left: 4px; bottom: 4px; padding: 0 5px; border-radius: 6px; font-size: 10px; background: rgba(0,0,0,.6); }
+    .lb-item.on { border-color: #3b82f6; box-shadow: 0 0 0 2px rgba(59,130,246,.45); }
+    .lb-item:active { transform: scale(.97); }
+    /* Hochladen: Fortschritt oben */
+    #upStatus { position: fixed; left: 50%; top: max(12px, env(safe-area-inset-top)); transform: translateX(-50%); z-index: 16; padding: 8px 14px;
+      border-radius: 99px; font-size: 14px; color: #fff; background: rgba(22, 24, 30, .9); border: 1px solid rgba(255,255,255,.16);
+      box-shadow: 0 6px 18px rgba(0,0,0,.4); white-space: nowrap; max-width: calc(100vw - 24px); overflow: hidden; text-overflow: ellipsis; }
+    #upStatus[hidden] { display: none; }
+    #upStatus .bar { display: block; height: 3px; margin-top: 5px; border-radius: 2px; background: #3b82f6; transition: width .2s; }
     /* Ton der gesteuerten Screens: Musik (mit Titelwahl) und Video-Ton */
     #soundBar { position: fixed; left: 50%; bottom: calc(max(12px, env(safe-area-inset-bottom)) + 80px); transform: translateX(-50%); z-index: 15;
       display: grid; gap: 10px; padding: 12px 14px; border-radius: 16px; font-size: 15px; width: min(440px, calc(100vw - 24px)); box-sizing: border-box;
@@ -275,12 +349,46 @@
     </div>
     <div class="sb-note">Lautstärke und Stumm gelten für den gewählten Screen. Titelwahl, Abspielen und das Verhalten bei Videos betreffen die Musik aller Screens.</div>
   </div>
+  <!-- Fernbedienung: Playlist mit Vorschaubildern (antippen = auf allen gesteuerten Screens zeigen) -->
+  <div id="listBar" hidden>
+    <div class="lb-head">
+      <select class="lb-select" title="Playlist wechseln – läuft sofort auf den gesteuerten Screens, Hochladen landet darin" translate="no"></select>
+      <span class="lb-count"></span>
+      <button class="lb-new" data-l="new" title="Neue Playlist anlegen – Hochgeladenes landet direkt darin">＋ Neu</button>
+      <button class="lb-del" data-l="delmode" title="Einträge löschen: antippen zum Auswählen">🗑</button>
+    </div>
+    <!-- Löschmodus: Kacheln antippen = auswählen, dann einmal bestätigen -->
+    <div class="lb-delbar" hidden>
+      <span class="lb-delhint">Zum Löschen antippen</span>
+      <button data-l="delall">Alle</button>
+      <button class="lb-delgo" data-l="delgo" disabled>Löschen</button>
+      <button data-l="deldone">Fertig</button>
+    </div>
+    <div class="lb-newform" hidden>
+      <input type="text" class="lb-newname" placeholder="Name der neuen Playlist" maxlength="60" enterkeyhint="done">
+      <button class="lb-ok" data-l="create">Anlegen</button>
+      <button class="lb-x" data-l="cancel" title="Abbrechen">✕</button>
+    </div>
+    <!-- Scrollen im äußeren Container: im Raster selbst würde die Höhenbegrenzung die Zeilen zusammendrücken -->
+    <div class="lb-scroll"><div class="lb-grid"></div></div>
+  </div>
+  <!-- Rückfrage beim Löschen (eigenes Fenster statt Browser-Popup) -->
+  <dialog id="lbAsk">
+    <p class="ask-q"></p>
+    <p class="ask-note">Hochgeladene Dateien werden mitgelöscht, sofern keine andere Playlist sie verwendet. Dateien aus Medienordnern bleiben erhalten.</p>
+    <div class="ask-btns"><button data-a="no">Abbrechen</button><button data-a="yes" class="danger">Löschen</button></div>
+  </dialog>
+  <div id="upStatus" hidden></div>
+  <input type="file" id="upInput" multiple accept="image/*,video/*,audio/*" hidden>
   <div id="remoteBar" hidden>
     <button data-r="stop" title="Fernsteuerung beenden"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
     <span class="rb-sep"></span>
     <button data-r="prev" title="Vorheriger Eintrag"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg></button>
     <div class="rb-info"><b>Fernsteuerung</b><span class="rb-targets"></span></div>
     <button data-r="next" class="primary" title="Nächster Eintrag"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"/></svg></button>
+    <button data-r="list" title="Playlist: Eintrag antippen und zeigen"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg></button>
+    <button data-r="upload" title="Fotos, Videos oder Musik von diesem Gerät hochladen"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 15V3M7 8l5-5 5 5"/><path d="M5 21h14"/></svg></button>
+    <span class="rb-break" aria-hidden="true"></span>
     <button data-r="unzoom" title="Zoom zurücksetzen" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M8 11h6M21 21l-4.3-4.3"/></svg></button>
     <button data-r="rotate" title="Bild drehen (90° im Uhrzeigersinn)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36L21 8"/><path d="M21 3v5h-5"/></svg></button>
     <button data-r="pen" title="Stift: auf dem Bild zeichnen"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg></button>
@@ -772,6 +880,7 @@
       currentKey = key;
       currentTitle = item?.title ?? '';
       currentItem = item ?? null;
+      markListCurrent(); // Playlist der Fernbedienung: aktuellen Eintrag hervorheben
       const my = ++token;
       const isCurrent = () => my === token;
       textTimer = null;
@@ -931,6 +1040,7 @@
       const proto = location.protocol === 'https:' ? 'wss' : 'ws';
       const qs = new URLSearchParams({ role: 'screen', id: screenId });
       if (params.get('name')) qs.set('name', params.get('name'));
+      if (params.get('pair')) qs.set('pair', params.get('pair')); // per QR gekoppelt: Fernbedienung starten
       ws = new WebSocket(`${proto}://${location.host}/ws?${qs}`);
       const statusDot = document.getElementById('status');
 
@@ -977,6 +1087,9 @@
           applyRemoteDraw(msg);
         } else if (msg.type === 'rotate') {
           if (remote?.role === 'target' && msg.itemId === currentItem?.id) setRotation(msg.r);
+        } else if (msg.type === 'remotePlaylist') {
+          remotePlaylist = msg;
+          renderList();
         } else if (msg.type === 'remoteSound') {
           remoteSoundState = msg;
           updateSoundBar();
@@ -1298,7 +1411,7 @@
     }
 
     document.addEventListener('pointerdown', (e) => {
-      if (penOn || e.pointerType === 'mouse' || e.target.closest('#menu, #remoteBar, #penBar, #soundBar') || !(zoomable() || remote?.role === 'controller')) return;
+      if (penOn || e.pointerType === 'mouse' || e.target.closest('#menu, #remoteBar, #penBar, #soundBar, #listBar, #lbAsk') || !(zoomable() || remote?.role === 'controller')) return;
       if (!touches.size) gestureMoved = false;
       touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
       startGesture();
@@ -1372,12 +1485,24 @@
       if (!ctrl) {
         setPen(false);
         setSoundBar(false);
+        setListBar(false);
       }
       if (!remote && strokes.length) clearInk();
       if (!remote && rot) setRotation(0);
       if (ctrl) remoteBar.querySelector('.rb-targets').textContent = remote.targets.length ? '→ ' + remote.targets.join(', ') : t('keine Screens gewählt');
+      if (ctrl && params.has('pair')) {
+        // Kopplung ist erledigt: Schlüssel aus der Adresse nehmen (Neuladen startet nicht erneut)
+        params.delete('pair');
+        history.replaceState(null, '', location.pathname + (params.size ? '?' + params : ''));
+      }
+      noteBarHeight();
       if (!menu.hidden) updateRemoteBox();
     }
+    // Höhe der Leiste für die Felder darüber (am Smartphone zwei Zeilen)
+    function noteBarHeight() {
+      requestAnimationFrame(() => remoteBar.offsetHeight && document.documentElement.style.setProperty('--rb-h', remoteBar.offsetHeight + 'px'));
+    }
+    addEventListener('resize', noteBarHeight);
 
     const remoteStep = (dir) => send({ type: 'remote', action: dir });
 
@@ -1543,7 +1668,7 @@
     }
 
     document.addEventListener('pointerdown', (e) => {
-      if (!penOn || drawing || e.target.closest('#menu, #remoteBar, #penBar, #soundBar')) return;
+      if (!penOn || drawing || e.target.closest('#menu, #remoteBar, #penBar, #soundBar, #listBar, #lbAsk')) return;
       e.preventDefault();
       const p = toImage(e.clientX, e.clientY);
       drawing = { id: Math.random().toString(36).slice(2, 10), color: pen.color, size: pen.size, pts: [...p, ...p], pointer: e.pointerId, sent: 0 };
@@ -1766,14 +1891,273 @@
     });
     addEventListener('pointerup', () => (soundDragging = false));
 
+    // -----------------------------------------------------------------------
+    // Playlist (nur am steuernden Gerät): Vorschaubilder der aktiven Playlist, antippen zeigt den
+    // Eintrag auf allen gesteuerten Screens. Der Server schickt Änderungen von selbst nach.
+    // -----------------------------------------------------------------------
+
+    const listBar = document.getElementById('listBar');
+    let remotePlaylist = null; // vom Server: { name, items: [{ id, title, type, thumb, bg, color, text }] }
+
+    function setListBar(on) {
+      listBar.hidden = !(on && remote?.role === 'controller');
+      remoteBar.querySelector('[data-r=list]').classList.toggle('on', !listBar.hidden);
+      if (listBar.hidden) return setDelMode(false);
+      setPen(false);
+      setSoundBar(false);
+      renderList(true);
+      send({ type: 'remotePlaylist' });
+    }
+
+    const TYPE_MARK = { video: '▶', text: 'T', url: '🌐' };
+    function renderList(scroll = false) {
+      if (listBar.hidden || !remotePlaylist) return;
+      // Auswahl der Playlisten (die aktive läuft auf den Screens, Hochladen landet darin)
+      const sel = listBar.querySelector('.lb-select');
+      const opts = (remotePlaylist.playlists ?? [{ id: remotePlaylist.activeId, name: remotePlaylist.name, count: remotePlaylist.items.length }])
+        .map((p) => `${p.id}\t${p.name} (${p.count})`)
+        .join('\n');
+      if (sel.dataset.opts !== opts) {
+        sel.dataset.opts = opts;
+        sel.replaceChildren(
+          ...opts.split('\n').map((line) => {
+            const [id, label] = line.split('\t');
+            return Object.assign(document.createElement('option'), { value: id, textContent: label });
+          })
+        );
+      }
+      if (document.activeElement !== sel) sel.value = remotePlaylist.activeId;
+      const n = remotePlaylist.items.length;
+      listBar.querySelector('.lb-count').textContent = n === 1 ? t('1 Eintrag') : t('{0} Einträge', n);
+      const grid = listBar.querySelector('.lb-grid');
+      // nur neu aufbauen, wenn sich die Liste geändert hat (Bilder sollen nicht neu laden)
+      const sig = remotePlaylist.activeId + ':' + remotePlaylist.items.map((i) => i.id + i.thumb).join('|');
+      if (grid.dataset.sig !== sig) {
+        grid.dataset.sig = sig;
+        if (!remotePlaylist.items.length) {
+          const empty = document.createElement('div');
+          empty.className = 'lb-empty';
+          empty.textContent = t('Noch leer – mit ⤒ Fotos, Videos oder Musik hochladen.');
+          grid.replaceChildren(empty);
+          grid.style.display = 'block';
+          return markListCurrent(scroll);
+        }
+        grid.style.display = '';
+        grid.replaceChildren(
+          ...remotePlaylist.items.map((i) => {
+            const b = document.createElement('button');
+            b.className = 'lb-item';
+            b.dataset.id = i.id;
+            b.title = i.title;
+            b.translate = false;
+            if (i.thumb) {
+              const img = new Image();
+              img.loading = 'lazy';
+              img.decoding = 'async';
+              img.alt = '';
+              img.src = i.thumb;
+              b.appendChild(img);
+            } else {
+              const tile = document.createElement('span');
+              tile.className = 'lb-t';
+              tile.textContent = i.type === 'text' ? i.text || i.title : i.title;
+              if (i.type === 'text') Object.assign(tile.style, { background: i.bg, color: i.color });
+              b.appendChild(tile);
+            }
+            if (TYPE_MARK[i.type]) {
+              const m = document.createElement('span');
+              m.className = 'lb-type';
+              m.textContent = TYPE_MARK[i.type];
+              b.appendChild(m);
+            }
+            return b;
+          })
+        );
+      }
+      markListCurrent(scroll);
+    }
+    // aktuell gezeigten Eintrag hervorheben (und beim Öffnen dorthin scrollen)
+    function markListCurrent(scroll = false) {
+      if (listBar.hidden) return;
+      let cur = null;
+      for (const b of listBar.querySelectorAll('.lb-item')) {
+        const on = b.dataset.id === currentItem?.id;
+        b.classList.toggle('on', on);
+        b.classList.toggle('sel', delSel.has(b.dataset.id)); // Auswahl im Löschmodus (bleibt beim Neuaufbau)
+        if (on) cur = b;
+      }
+      updateDelBar();
+      if (scroll && cur) {
+        // nur den Container scrollen, nicht die Seite
+        const sc = listBar.querySelector('.lb-scroll');
+        sc.scrollTop += cur.getBoundingClientRect().top - sc.getBoundingClientRect().top - (sc.clientHeight - cur.offsetHeight) / 2;
+      }
+    }
+    // Playlist wechseln bzw. neu anlegen: gilt sofort für die gesteuerten Screens
+    const newForm = listBar.querySelector('.lb-newform');
+    const newName = listBar.querySelector('.lb-newname');
+    listBar.querySelector('.lb-select').addEventListener('change', (e) => send({ type: 'remote', action: 'playlist', id: e.target.value }));
+    function createPlaylist() {
+      send({ type: 'remote', action: 'newPlaylist', name: newName.value.trim() });
+      newForm.hidden = true;
+      newName.blur();
+      // nächster Schritt: hochladen – Knopf kurz hervorheben
+      const up = remoteBar.querySelector('[data-r=upload]');
+      up.classList.remove('hint');
+      void up.offsetWidth;
+      up.classList.add('hint');
+    }
+    newName.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter') return;
+      e.preventDefault();
+      createPlaylist();
+    });
+    listBar.addEventListener('click', (e) => {
+      e.stopPropagation(); // kein Menü
+      const l = e.target.closest('[data-l]')?.dataset.l;
+      if (l === 'new') {
+        newForm.hidden = !newForm.hidden;
+        if (!newForm.hidden) {
+          newName.value = '';
+          newName.focus();
+        }
+        return;
+      }
+      if (l === 'create') return createPlaylist();
+      if (l === 'cancel') return (newForm.hidden = true);
+      if (l === 'delmode') return setDelMode(!delMode);
+      if (l === 'deldone') return setDelMode(false);
+      if (l === 'delall') {
+        // alle auswählen bzw. – wenn schon alle gewählt – keine
+        const ids = (remotePlaylist?.items ?? []).map((i) => i.id);
+        const all = ids.length && ids.every((id) => delSel.has(id));
+        delSel.clear();
+        if (!all) ids.forEach((id) => delSel.add(id));
+        return markListCurrent();
+      }
+      if (l === 'delgo') return deleteSelected();
+      const b = e.target.closest('.lb-item');
+      if (!b) return;
+      if (delMode) {
+        delSel.has(b.dataset.id) ? delSel.delete(b.dataset.id) : delSel.add(b.dataset.id);
+        return markListCurrent();
+      }
+      send({ type: 'remote', action: 'show', itemId: b.dataset.id });
+      for (const x of listBar.querySelectorAll('.lb-item')) x.classList.toggle('on', x === b); // sofort sichtbar
+    });
+    listBar.addEventListener('pointerdown', (e) => e.stopPropagation());
+
+    // Löschen: Löschmodus an, Kacheln antippen (auswählen), einmal bestätigen
+    let delMode = false;
+    const delSel = new Set();
+    function setDelMode(on) {
+      delMode = on;
+      delSel.clear();
+      listBar.classList.toggle('del-mode', on);
+      listBar.querySelector('.lb-delbar').hidden = !on;
+      if (on) newForm.hidden = true;
+      markListCurrent();
+    }
+    function updateDelBar() {
+      // nicht mehr vorhandene Einträge aus der Auswahl nehmen
+      const present = new Set((remotePlaylist?.items ?? []).map((i) => i.id));
+      for (const id of delSel) if (!present.has(id)) delSel.delete(id);
+      const go = listBar.querySelector('.lb-delgo');
+      go.disabled = !delSel.size;
+      go.textContent = delSel.size ? t('Löschen ({0})', delSel.size) : t('Löschen');
+      listBar.querySelector('.lb-delhint').textContent = delSel.size ? t('{0} ausgewählt', delSel.size) : t('Zum Löschen antippen');
+    }
+    const lbAsk = document.getElementById('lbAsk');
+    lbAsk.addEventListener('click', (e) => e.stopPropagation()); // kein Menü
+    lbAsk.addEventListener('pointerdown', (e) => e.stopPropagation());
+    function askDelete(count) {
+      return new Promise((resolve) => {
+        lbAsk.querySelector('.ask-q').textContent = count === 1 ? t('1 Eintrag aus der Playlist löschen?') : t('{0} Einträge aus der Playlist löschen?', count);
+        const done = (yes) => {
+          lbAsk.onclick = lbAsk.oncancel = null;
+          lbAsk.close();
+          resolve(yes);
+        };
+        lbAsk.onclick = (e) => {
+          const a = e.target.closest('button')?.dataset.a;
+          if (a) done(a === 'yes');
+          else if (e.target === lbAsk) done(false); // Klick daneben
+        };
+        lbAsk.oncancel = (e) => {
+          e.preventDefault();
+          done(false);
+        };
+        lbAsk.showModal();
+        lbAsk.querySelector('[data-a=no]').focus();
+      });
+    }
+    async function deleteSelected() {
+      if (!delSel.size || !(await askDelete(delSel.size))) return;
+      send({ type: 'remote', action: 'delete', itemIds: [...delSel] });
+      showUp('✓ ' + t('{0} gelöscht', delSel.size), null, 3000);
+      delSel.clear();
+      markListCurrent();
+    }
+
+    // -----------------------------------------------------------------------
+    // Hochladen (nur am steuernden Gerät): Fotos, Videos, Musik aus der Galerie. Bilder/Videos kommen in
+    // die aktive Playlist, Musik in die Musikliste; das erste neue Bild/Video läuft sofort.
+    // -----------------------------------------------------------------------
+
+    const upStatus = document.getElementById('upStatus');
+    const upInput = document.getElementById('upInput');
+    let upTimer = null;
+    function showUp(text, pct = null, ms = 0) {
+      clearTimeout(upTimer);
+      upStatus.hidden = false;
+      upStatus.textContent = text;
+      if (pct !== null) {
+        const bar = document.createElement('span');
+        bar.className = 'bar';
+        bar.style.width = pct + '%';
+        upStatus.appendChild(bar);
+      }
+      if (ms) upTimer = setTimeout(() => (upStatus.hidden = true), ms);
+    }
+    upInput.addEventListener('change', () => {
+      const files = [...upInput.files];
+      upInput.value = '';
+      if (!files.length || remote?.role !== 'controller') return;
+      const form = new FormData();
+      for (const f of files) form.append('files', f, f.name);
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', `/remote/upload?screen=${encodeURIComponent(screenId)}&key=${encodeURIComponent(remote.key ?? '')}`);
+      const label = t('{0} Dateien', files.length);
+      showUp(t('Lade hoch: {0}', label), 0);
+      xhr.upload.onprogress = (e) => e.lengthComputable && showUp(t('Lade hoch: {0}', label) + ` · ${Math.round((e.loaded / e.total) * 100)} %`, (e.loaded / e.total) * 100);
+      xhr.onload = () => {
+        let r = {};
+        try { r = JSON.parse(xhr.responseText); } catch {}
+        if (xhr.status !== 200) return showUp('⚠ ' + (r.error || t('Hochladen fehlgeschlagen')), null, 6000);
+        const parts = [];
+        if (r.added) parts.push(t('{0} neu', r.added));
+        if (r.music) parts.push(t('{0} Musik', r.music));
+        if (r.skipped) parts.push(t('{0} schon vorhanden', r.skipped));
+        showUp('✓ ' + (parts.join(' · ') || t('Nichts hochgeladen')), null, 4000);
+      };
+      xhr.onerror = () => showUp('⚠ ' + t('Hochladen fehlgeschlagen'), null, 6000);
+      xhr.send(form);
+    });
+
     remoteBar.addEventListener('click', (e) => {
       e.stopPropagation(); // kein Menü
       const action = e.target.closest('button')?.dataset.r;
       if (action === 'pen') {
         setSoundBar(false);
+        setListBar(false);
         setPen(!penOn);
       }
-      if (action === 'sound') setSoundBar(soundBar.hidden);
+      if (action === 'sound') {
+        setListBar(false);
+        setSoundBar(soundBar.hidden);
+      }
+      if (action === 'list') setListBar(listBar.hidden);
+      if (action === 'upload') upInput.click(); // öffnet am Smartphone die Galerie bzw. Kamera
       if (action === 'rotate' && rotatable()) {
         setRotation(rot + 1);
         send({ type: 'remoteRotate', itemId: currentItem?.id, r: rot });

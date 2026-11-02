@@ -1,3 +1,4 @@
+import { execFile } from 'node:child_process';
 import express from 'express';
 import multer from 'multer';
 import { WebSocketServer } from 'ws';
@@ -12,10 +13,7 @@ import multicastDns from 'multicast-dns';
 import QRCode from 'qrcode';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const PORT = Number(process.env.PORT) || 3000;
-// Zusätzlich auf Port 80, damit die Adresse ohne Portangabe funktioniert (http://screendeck.local).
-// Ist er belegt oder fehlt die Berechtigung, läuft alles wie gewohnt nur auf PORT. EXTRA_PORT=0 schaltet ab.
-const EXTRA_PORT = process.env.EXTRA_PORT !== undefined ? Number(process.env.EXTRA_PORT) || 0 : 80;
+// Ports (Hauptport und Zusatz-Port) kommen aus ⚙ Einstellungen → Netzwerk, siehe nach dem Laden des Zustands
 let shortPort = null; // Port, unter dem die kurze Adresse tatsächlich erreichbar ist
 const withPort = (host, port) => `http://${host}${port === 80 ? '' : ':' + port}`;
 const DATA_DIR = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(__dirname, 'data');
@@ -28,14 +26,23 @@ fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 // State
 // ---------------------------------------------------------------------------
 
+/** Alte Verteilung „Zufall“ = jeder Screen eigenes, zufällige Reihenfolge */
+function migrateSettings(settings) {
+  if (settings.distribution === 'random') return { ...settings, distribution: 'order', shuffle: true };
+  return settings;
+}
+
 const DEFAULT_SETTINGS = {
-  distribution: 'order', // 'order' = der Reihe nach, 'random' = Zufall, 'sync' = alle Screens zeigen dasselbe
+  distribution: 'order', // 'order' = jeder Screen zeigt etwas anderes, 'sync' = alle Screens zeigen dasselbe
+  shuffle: false, // Reihenfolge der Playlist: false = der Reihe nach, true = Zufall (gilt für beide Arten)
   autoAdvance: false,
   interval: 30, // Sekunden
   imageQuality: 'original', // Bilder vor der Übertragung verkleinern: original | uhd | fhd | hd | low
   screenMenu: true, // Antippen zeigt auf den Screens ein Menü (Name, Vollbild, …)
   touchZoom: true, // Inhalte auf den Screens per Fingergeste vergrößern
   hostName: 'screendeck', // Name im Netzwerk: http://screendeck.local:<Port> (leer = aus)
+  port: 3000, // Hauptport (wirkt nach einem Neustart)
+  extraPort: 80, // zusätzlicher Port für Adressen ohne Portangabe (80) oder ein anderer freier; 0 = aus
   duplicates: 'skip', // doppelte Dateien beim Upload: 'skip' = aussortieren, 'add' = trotzdem hinzufügen
 };
 
@@ -55,7 +62,7 @@ function loadState() {
     playlists,
     activePlaylistId: active.id,
     playlist: active.items,
-    settings: { ...DEFAULT_SETTINGS, ...saved.settings },
+    settings: migrateSettings({ ...DEFAULT_SETTINGS, ...saved.settings }),
     syncQueue: saved.syncQueue ?? [],
     auth: saved.auth ?? {},
     music: saved.music ?? null,
@@ -64,6 +71,13 @@ function loadState() {
 }
 
 const state = loadState();
+
+// Ports: Umgebungsvariable (PORT, EXTRA_PORT) vor Einstellung vor Standard.
+// Der Hauptport gilt ab Start; den Zusatz-Port kann die Verwaltung im laufenden Betrieb ändern.
+const validPort = (v) => (Number.isInteger(Number(v)) && Number(v) >= 0 && Number(v) <= 65535 ? Number(v) : null);
+const PORT = validPort(process.env.PORT) || validPort(state.settings.port) || 3000;
+const EXTRA_FROM_ENV = process.env.EXTRA_PORT !== undefined;
+const extraPortSetting = () => (EXTRA_FROM_ENV ? validPort(process.env.EXTRA_PORT) ?? 0 : validPort(state.settings.extraPort) ?? 80);
 
 let saveTimer = null;
 function save() {
@@ -165,6 +179,7 @@ function assign(screen, itemId, reason) {
 const SYNC_LEAD = 2000; // Vorlauf, damit alle Screens laden können, bevor es losgeht
 let sync = { itemId: null, start: 0 };
 const isSyncMode = () => state.settings.distribution === 'sync';
+const isShuffle = () => !!state.settings.shuffle;
 const inSync = (s) => isSyncMode() && !pinnedOf(s);
 const syncGroup = () => state.screens.filter(inSync);
 
@@ -192,7 +207,8 @@ function startSync(itemId, reason) {
 function syncAdvance(reason) {
   const queued = takeFromQueue(state.syncQueue);
   const rotation = rotationItems();
-  const next = queued ?? (rotation.length ? pickNext(rotation, new Set(), sync.itemId) : null);
+  const pick = isShuffle() ? pickRandom : pickNext; // alle gleich: gemeinsam der Reihe nach oder zufällig
+  const next = queued ?? (rotation.length ? pick(rotation, new Set(), sync.itemId) : null);
   startSync(next, queued ? 'Warteschlange' : reason);
 }
 
@@ -216,7 +232,7 @@ function distribute() {
     if (inSync(s)) continue;
     let next = pinnedOf(s);
     if (!next && rotation.length) {
-      next = state.settings.distribution === 'random'
+      next = isShuffle()
         ? pickRandom(rotation, used, s.currentItemId)
         : rotation[n++ % rotation.length].id;
     }
@@ -253,7 +269,7 @@ function advanceScreens(ids, reason) {
     const queued = s.remote ? null : takeFromQueue(s.queue);
     let next = queued ?? pinnedOf(s);
     if (!next && rotation.length) {
-      next = state.settings.distribution === 'random'
+      next = isShuffle()
         ? pickRandom(rotation, used, s.currentItemId)
         : pickNext(rotation, used, s.currentItemId);
     }
@@ -272,10 +288,10 @@ const REMOTE_GRACE = 120000; // so lange darf das steuernde Gerät weg sein (z. 
 const remoteTargets = (ctrl) => (ctrl.remote?.targets ?? []).map(screenById).filter(Boolean);
 const remoteGroup = (ctrl) => [ctrl, ...remoteTargets(ctrl)];
 
-/** Fernsteuerungs-Angaben für einen Screen (Rolle und beteiligte Screens) */
+/** Fernsteuerungs-Angaben für einen Screen (Rolle und beteiligte Screens; key = Schlüssel fürs Hochladen) */
 function remoteMsg(screen) {
   const r = screen.remote;
-  if (r?.role === 'controller') return { role: 'controller', targets: remoteTargets(screen).map((t) => t.name) };
+  if (r?.role === 'controller') return { role: 'controller', targets: remoteTargets(screen).map((t) => t.name), key: r.key };
   if (r?.role === 'target') return { role: 'target', by: screenById(r.by)?.name ?? '' };
   return null;
 }
@@ -310,7 +326,8 @@ function startRemote(ctrl, targetIds) {
     .filter((t) => t && t !== ctrl);
   for (const t of targets) leaveRemote(t);
   const itemId = pinnedOf(ctrl) ?? ctrl.currentItemId ?? state.playlist.find((i) => i.enabled)?.id ?? null;
-  ctrl.remote = { role: 'controller', targets: targets.map((t) => t.id), itemId };
+  // key: Schlüssel, mit dem nur dieses Gerät während der Fernsteuerung Dateien hochladen darf
+  ctrl.remote = { role: 'controller', targets: targets.map((t) => t.id), itemId, key: crypto.randomBytes(16).toString('hex') };
   for (const t of targets) t.remote = { role: 'target', by: ctrl.id, itemId };
   for (const g of remoteGroup(ctrl)) if (modeOf(g) !== 'play') setMode(g, 'play'); // gesteuerte Inhalte sichtbar machen
   remoteShow(ctrl, itemId);
@@ -400,6 +417,73 @@ function stopRemote(ctrl) {
   }
 }
 
+/** Vorschaubild eines Eintrags (wie in der Verwaltung): Bilder verkleinert, Videos mit Standbild, sonst keins */
+function thumbOf(item) {
+  if (item.type === 'image') return /\.(gif|svg)(\?|$)/i.test(decodeURIComponent(item.src ?? '')) ? item.src : `/img/${item.id}/thumb?v=${item.updatedAt}`;
+  if (item.type === 'video') return item.thumb ?? null;
+  return null;
+}
+/** Aktive Playlist für die Fernbedienung (nur eingeschaltete Einträge, in Playlist-Reihenfolge) */
+function remotePlaylistMsg() {
+  return {
+    type: 'remotePlaylist',
+    name: state.playlists.find((p) => p.id === state.activePlaylistId)?.name ?? '',
+    activeId: state.activePlaylistId,
+    playlists: state.playlists.map((p) => ({ id: p.id, name: p.name, count: p.items.length })), // zum Wechseln
+    items: state.playlist
+      .filter((i) => i.enabled)
+      .map((i) => ({ id: i.id, title: i.title, type: i.type, thumb: thumbOf(i), ...(i.type === 'text' && { bg: i.bg, color: i.color, text: String(i.text ?? '').slice(0, 80) }) })),
+  };
+}
+/** Playlist an alle steuernden Geräte schicken (nach Änderungen an der aktiven Playlist) */
+function pushRemotePlaylist() {
+  const ctrls = state.screens.filter((c) => c.remote?.role === 'controller');
+  if (!ctrls.length) return;
+  const msg = remotePlaylistMsg();
+  for (const c of ctrls) for (const ws of screenSockets.get(c.id) ?? []) send(ws, msg);
+}
+
+/**
+ * Fernbedienung: andere Playlist auf den Screens abspielen bzw. eine neue (leere) anlegen und abspielen –
+ * Uploads vom Smartphone landen dann direkt darin. Die Gruppe zeigt den ersten Eintrag (bzw. nichts).
+ */
+function remotePlaylistSwitch(ctrl, msg) {
+  let p;
+  if (msg.action === 'newPlaylist') {
+    p = { id: newId(), name: String(msg.name ?? '').trim().slice(0, 60) || 'Neue Playlist', items: [] };
+    state.playlists.push(p);
+  } else p = state.playlists.find((x) => x.id === msg.id);
+  if (!p) return;
+  if (p.id !== state.activePlaylistId) activatePlaylist(p);
+  remoteShow(ctrl, state.playlist.find((i) => i.enabled)?.id ?? null);
+  pushRemotePlaylist();
+}
+
+/**
+ * Fernbedienung: Einträge aus der aktiven Playlist löschen (wie in der Verwaltung: hochgeladene Dateien nur,
+ * wenn sie nirgends mehr verwendet werden; Dateien aus Medienordnern bleiben). Läuft gerade einer davon,
+ * zeigt die Gruppe den nächsten verbleibenden Eintrag.
+ */
+function remoteDelete(ctrl, ids) {
+  const gone = new Set((Array.isArray(ids) ? ids : []).slice(0, 1000).map(String));
+  const items = state.playlist.filter((i) => gone.has(i.id));
+  if (!items.length) return;
+  const shown = ctrl.remote.itemId;
+  let next = null;
+  if (gone.has(shown)) {
+    // nächster nicht gelöschter, eingeschalteter Eintrag nach dem gezeigten (sonst davor)
+    const list = state.playlist;
+    const at = list.findIndex((i) => i.id === shown);
+    const keep = (i) => i.enabled && !gone.has(i.id);
+    next = list.slice(at + 1).find(keep) ?? list.slice(0, at).reverse().find(keep) ?? null;
+  }
+  for (const item of items) removeItem(item, state.playlist);
+  if (gone.has(shown)) remoteShow(ctrl, next?.id ?? null);
+  redistributeAfterPlaylistChange();
+  pushRemotePlaylist();
+  changed();
+}
+
 /** Am steuernden Gerät vor/zurück durch die aktiven Einträge der Playlist */
 function remoteStep(ctrl, dir) {
   const items = state.playlist.filter((i) => i.enabled);
@@ -440,6 +524,10 @@ function handleRemoteMessage(screen, msg, ws) {
     for (const t of remoteTargets(screen)) for (const tws of screenSockets.get(t.id) ?? []) send(tws, out);
     return;
   }
+  if (msg.type === 'remotePlaylist') {
+    if (screen.remote?.role !== 'controller') return;
+    return send(ws, remotePlaylistMsg());
+  }
   if (msg.type === 'remoteRotate') {
     // Drehung in Vierteldrehungen (im Uhrzeigersinn) an die gesteuerten Screens weiterreichen
     if (screen.remote?.role !== 'controller') return;
@@ -457,6 +545,9 @@ function handleRemoteMessage(screen, msg, ws) {
   if (msg.action === 'start') startRemote(screen, msg.targets);
   else if (msg.action === 'stop') leaveRemote(screen);
   else if (screen.remote?.role === 'controller' && (msg.action === 'next' || msg.action === 'prev')) remoteStep(screen, msg.action === 'next' ? 1 : -1);
+  else if (screen.remote?.role === 'controller' && msg.action === 'show' && itemById(msg.itemId)) remoteShow(screen, msg.itemId); // aus der Playlist gewählt
+  else if (screen.remote?.role === 'controller' && (msg.action === 'playlist' || msg.action === 'newPlaylist')) remotePlaylistSwitch(screen, msg);
+  else if (screen.remote?.role === 'controller' && msg.action === 'delete') remoteDelete(screen, msg.itemIds);
   changed();
 }
 
@@ -488,7 +579,7 @@ function previewNext(screen) {
   if (pinnedOf(screen)) return { itemId: screen.pinnedItemId, kind: 'pinned' };
   const rotation = rotationItems();
   if (!rotation.length) return null;
-  if (state.settings.distribution === 'random') return { itemId: null, kind: 'random' };
+  if (isShuffle()) return { itemId: null, kind: 'random' };
   if (isSyncMode()) return { itemId: pickNext(rotation, new Set(), sync.itemId), kind: 'sync' };
   const used = new Set();
   for (const s of state.screens) {
@@ -871,6 +962,7 @@ function stateForAdmin() {
       keys: p.items.map((i) => (i.file ? 'upload:' + i.file : i.mediaFile ? 'media:' + i.mediaFile : null)).filter(Boolean),
     })),
     auth: undefined, // PIN-Prüfwerte und Schlüssel nie an die Oberfläche
+    settings: { ...state.settings, mediaSources: sourcesForAdmin(), pairKey: undefined }, // Kennwörter und Kopplungs-Schlüssel auch nicht
     security: { admin: !!state.auth.admin, screen: !!state.auth.screen },
     music: { ...state.music, position: musicPosition(), videoSound },
   };
@@ -892,15 +984,23 @@ function sendFullState(ws) {
   if (ws.readyState === ws.OPEN) ws.send(partsMsg(parts, true));
 }
 
+let lastRemotePlaylist = '';
 function broadcastState() {
   broadcastTimer = null;
-  if (!adminSockets.size) return;
+  if (!adminSockets.size) {
+    // keine Verwaltung offen: Fernbedienungen trotzdem über Änderungen der Playlist informieren
+    const json = JSON.stringify(remotePlaylistMsg());
+    if (json !== lastRemotePlaylist) pushRemotePlaylist();
+    lastRemotePlaylist = json;
+    return;
+  }
   const changedParts = {};
   for (const [k, v] of Object.entries(adminParts())) {
     const json = JSON.stringify(v);
     if (k === 'rest' || json !== lastParts[k]) changedParts[k] = json; // „rest“ ist klein und enthält die Serverzeit
     lastParts[k] = json;
   }
+  if (changedParts.playlists) pushRemotePlaylist(); // Fernbedienungen zeigen die aktive Playlist
   const msg = partsMsg(changedParts, false);
   for (const ws of adminSockets) if (ws.readyState === ws.OPEN) ws.send(msg);
 }
@@ -1041,7 +1141,8 @@ app.get('/screen', (req, res, next) => {
     setAuthCookie(res, 'screen');
     return res.redirect(clean);
   }
-  authorized(req, 'screen') ? next() : toLogin(req, res, 'screen');
+  if (validPair(req.query.pair) && state.auth.screen && !authorized(req, 'screen')) setAuthCookie(res, 'screen'); // Kopplung ersetzt die Screen-PIN
+  authorized(req, 'screen') || validPair(req.query.pair) ? next() : toLogin(req, res, 'screen');
 });
 // Bilder in reduzierter Qualität für die Screens (siehe Bildqualität)
 app.get('/img/:id/:preset', async (req, res) => {
@@ -1189,17 +1290,39 @@ startMdns();
 // damit sie auch auf Geräten ohne .local-Unterstützung (Android) funktioniert.
 // ---------------------------------------------------------------------------
 
+// Smartphone als Fernbedienung koppeln: Der QR-Code enthält einen Schlüssel. Wer ihn scannt, darf
+// fernsteuern (ohne Freischaltung in der Verwaltung) und startet sofort mit allen verbundenen Screens.
+// Nur die Verwaltung bekommt den Code; „Neuen Code erzeugen“ macht alte ungültig.
+const newPairKey = () => crypto.randomBytes(9).toString('base64url');
+if (!state.settings.pairKey) {
+  state.settings.pairKey = newPairKey();
+  save();
+}
+const validPair = (key) => typeof key === 'string' && safeEqual(key, state.settings.pairKey);
+
 function connectUrls(req) {
   const ip = addressesFor(String(req.socket.remoteAddress ?? '').replace(/^::ffff:/, ''))[0] ?? req.hostname;
   const base = withPort(ip, shortPort ?? PORT);
-  return { screen: base + '/', admin: base + '/admin' };
+  return {
+    screen: base + '/',
+    admin: base + '/admin',
+    // nur für die (angemeldete) Verwaltung
+    ...(authorized(req, 'admin') && { remote: `${base}/screen?pair=${state.settings.pairKey}&name=Smartphone` }),
+  };
 }
 app.get('/connect', (req, res) => res.sendFile(path.join(__dirname, 'public', 'connect.html')));
 app.get('/connect.json', (req, res) => res.set('Cache-Control', 'no-store').json(connectUrls(req)));
 app.get('/qr.svg', async (req, res) => {
-  const url = connectUrls(req)[req.query.for === 'admin' ? 'admin' : 'screen'];
+  const url = connectUrls(req)[['admin', 'remote'].includes(req.query.for) ? req.query.for : 'screen'];
+  if (!url) return res.status(401).end(); // Kopplungs-Code nur für die Verwaltung
   const svg = await QRCode.toString(url, { type: 'svg', margin: 1, errorCorrectionLevel: 'M' });
   res.type('image/svg+xml').set('Cache-Control', 'no-store').send(svg);
+});
+
+app.post('/api/pair-key', (req, res) => {
+  state.settings.pairKey = newPairKey();
+  changed();
+  res.json({ ok: true });
 });
 
 app.get('/api/info', (req, res) => {
@@ -1207,7 +1330,21 @@ app.get('/api/info', (req, res) => {
     .flat()
     .filter((a) => a && a.family === 'IPv4' && !a.internal)
     .map((a) => a.address);
-  res.json({ port: PORT, shortPort, addresses, hostName: hostName() });
+  res.json({
+    port: PORT,
+    shortPort,
+    addresses,
+    hostName: hostName(),
+    // Netzwerk-Einstellungen: was eingestellt ist, was läuft und ob eine Umgebungsvariable es festlegt
+    ports: {
+      port: validPort(state.settings.port) || 3000,
+      portFromEnv: !!process.env.PORT,
+      restartNeeded: !process.env.PORT && (validPort(state.settings.port) || 3000) !== PORT,
+      extraPort: extraPortSetting(),
+      extraFromEnv: EXTRA_FROM_ENV,
+      extra: extraStatus,
+    },
+  });
 });
 
 // --- Playlist ---------------------------------------------------------------
@@ -1270,6 +1407,104 @@ if (!Array.isArray(state.settings.mediaSources)) {
 }
 const mediaSource = (id) => state.settings.mediaSources.find((m) => m.id === id) ?? null;
 
+// ---------------------------------------------------------------------------
+// Anmeldung für Netzwerkfreigaben (\\Server\Freigabe, nur Windows): Der Server meldet sich per
+// „net use“ an der Freigabe an, bevor er sie liest. Das Kennwort wird mit dem Windows-Konto des
+// Servers verschlüsselt gespeichert (DPAPI) und nie an die Oberfläche geschickt.
+// ---------------------------------------------------------------------------
+
+const isUnc = (p) => /^\\\\[^\\]+\\[^\\]+/.test(p);
+/** \\Server\Freigabe aus einem Pfad darunter */
+const shareRoot = (p) => p.match(/^\\\\[^\\]+\\[^\\]+/)?.[0] ?? null;
+
+/** PowerShell mit Eingabe über stdin (Kennwörter nicht in der Befehlszeile) */
+function powershell(script, input) {
+  return new Promise((resolve, reject) => {
+    const ps = execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { windowsHide: true, timeout: 20000 }, (err, stdout, stderr) =>
+      err ? reject(new Error((stderr || err.message).trim())) : resolve(stdout.trim())
+    );
+    ps.stdin.end(input);
+  });
+}
+const encryptSecret = (plain) => powershell('$p = [Console]::In.ReadToEnd(); ConvertTo-SecureString $p -AsPlainText -Force | ConvertFrom-SecureString', plain);
+const decryptSecret = (secret) =>
+  powershell('$s = [Console]::In.ReadToEnd().Trim() | ConvertTo-SecureString; [Runtime.InteropServices.Marshal]::PtrToStringBSTR([Runtime.InteropServices.Marshal]::SecureStringToBSTR($s))', secret);
+
+/** An der Freigabe anmelden (falls für die Quelle eine Anmeldung hinterlegt ist); Fehlertext oder null */
+async function connectShare(source) {
+  if (!source?.auth?.user || !isUnc(source.path)) return null;
+  if (process.platform !== 'win32') return 'Anmeldung an Netzwerkfreigaben wird nur unter Windows unterstützt – die Freigabe bitte im System einbinden';
+  try {
+    const password = source.auth.secret ? await decryptSecret(source.auth.secret) : '';
+    await new Promise((resolve, reject) =>
+      execFile('net', ['use', shareRoot(source.path), password, '/user:' + source.auth.user, '/persistent:no'], { windowsHide: true, timeout: 30000 }, (err, stdout, stderr) =>
+        err ? reject(new Error((stderr || stdout || err.message).trim())) : resolve()
+      )
+    );
+    return null;
+  } catch (e) {
+    if (/ConvertTo-SecureString|Schlüssel|key/i.test(e.message)) return 'Gespeichertes Kennwort kann nicht entschlüsselt werden (anderes Windows-Konto?) – bitte neu eingeben';
+    return netError(e.message);
+  }
+}
+
+/** Verständliche Meldung zu einem Fehler von „net use“ / „net view“ */
+function netError(msg) {
+  // „Systemfehler 86 aufgetreten.“ / „System error 86 has occurred.“
+  const code = Number(msg.match(/(?:Systemfehler|System error)\s+(\d+)/i)?.[1]);
+  if (code === 1219) return 'Zu dieser Freigabe besteht schon eine Verbindung mit anderem Benutzer (Windows erlaubt nur einen je Server). Bestehende Verbindung trennen oder dieselbe Anmeldung verwenden.';
+  if (code === 86 || code === 1326) return 'Anmeldung fehlgeschlagen: Benutzername oder Kennwort falsch';
+  if (code === 53 || code === 67 || code === 51 || code === 1707) return 'Server oder Freigabe nicht gefunden';
+  if (code === 5) return 'Zugriff verweigert';
+  return 'Anmeldung an der Freigabe fehlgeschlagen: ' + msg.split('\n')[0];
+}
+
+/** net-Befehl ausführen (Ausgabe in UTF-8, damit Umlaute in Freigabenamen stimmen) */
+function runNet(args) {
+  return new Promise((resolve, reject) =>
+    execFile('cmd.exe', ['/d', '/c', 'chcp 65001 >nul & net ' + args], { windowsHide: true, timeout: 30000 }, (err, stdout, stderr) =>
+      err ? reject(new Error((stderr || stdout || err.message).trim())) : resolve(stdout)
+    )
+  );
+}
+
+/** Anmelden per „net use“ – direkt ohne Shell, damit Kennwörter mit Sonderzeichen unverändert ankommen */
+function netUse(target, user, password) {
+  return new Promise((resolve, reject) =>
+    execFile('net', ['use', target, password, '/user:' + user, '/persistent:no'], { windowsHide: true, timeout: 30000 }, (err, stdout, stderr) =>
+      err ? reject(new Error((stderr || stdout || err.message).trim())) : resolve()
+    )
+  );
+}
+
+/** Freigaben eines Servers (nur Laufwerks-Freigaben, keine Drucker/IPC), per „net view“ */
+async function listShares(server) {
+  // ohne Anführungszeichen: Node maskiert sie für cmd.exe falsch; der Name ist geprüft (Buchstaben, Ziffern, . -)
+  if (!/^[\w.-]+$/.test(server)) throw new Error('Ungültiger Servername');
+  const out = await runNet(`view \\\\${server}`);
+  const lines = out.split(/\r?\n/);
+  const dash = lines.findIndex((l) => /^-{10,}/.test(l));
+  // Spalte „Typ“/„Type“ aus der Überschrift, damit Freigabenamen mit Leerzeichen erhalten bleiben
+  const header = lines.slice(0, dash).reverse().find((l) => /\bTyp(e)?\b/.test(l)) ?? '';
+  const col = header.search(/\bTyp(e)?\b/);
+  const shares = [];
+  for (const line of lines.slice(dash + 1)) {
+    if (!line.trim() || col < 1 || line.length <= col) continue;
+    const name = line.slice(0, col).trim();
+    const type = line.slice(col).trim().split(/\s+/)[0];
+    if (name && /^(Platte|Disk)$/i.test(type)) shares.push(name);
+  }
+  return shares.sort((a, b) => a.localeCompare(b, 'de', { numeric: true }));
+}
+
+/** Medienquellen für die Oberfläche: ohne verschlüsseltes Kennwort, nur ob eine Anmeldung hinterlegt ist */
+const sourcesForAdmin = () => state.settings.mediaSources.map(({ auth, ...m }) => ({ ...m, ...(auth?.user && { auth: { user: auth.user } }) }));
+
+// Nach dem Start an allen Freigaben mit Anmeldung anmelden (Fehler zeigt die Medienliste beim Öffnen)
+setTimeout(() => {
+  for (const m of state.settings.mediaSources) if (m.auth?.user) connectShare(m).then((err) => err && console.warn(`Medienquelle „${m.name}“: ${err}`));
+}, 500);
+
 /** Relativen Pfad (mit /) sicher innerhalb der Quelle auflösen, sonst null */
 function resolveMedia(source, rel) {
   if (!source) return null;
@@ -1290,8 +1525,15 @@ app.get('/api/media', async (req, res) => {
   if (!dir) return res.status(400).json({ error: 'Ungültiger Ordner' });
   let entries;
   try {
-    entries = await fs.promises.readdir(dir, { withFileTypes: true });
+    entries = await fs.promises.readdir(dir, { withFileTypes: true }).catch(async (e) => {
+      // Netzwerkfreigabe mit Anmeldung: Verbindung (neu) herstellen und noch einmal versuchen
+      if (!source.auth?.user) throw e;
+      const err = await connectShare(source);
+      if (err) throw Object.assign(new Error(err), { code: 'AUTH' });
+      return fs.promises.readdir(dir, { withFileTypes: true });
+    });
   } catch (e) {
+    if (e.code === 'AUTH') return res.status(404).json({ error: e.message });
     const reason = e.code === 'ENOENT' ? 'nicht gefunden' : e.code === 'EACCES' || e.code === 'EPERM' ? 'kein Zugriff' : 'nicht erreichbar';
     return res.status(404).json({ error: `Ordner ${reason}: ${dir}` });
   }
@@ -1340,26 +1582,112 @@ async function listUploads() {
   return { source: 'uploads', root: UPLOAD_DIR, dir: '', folders: [], files };
 }
 
+// ---------------------------------------------------------------------------
+// Ordner-Browser zum Einbinden einer Medienquelle: ohne Pfad die Laufwerke, bei \\Server dessen
+// Freigaben, sonst die Unterordner. POST, weil optional Benutzer und Kennwort mitkommen.
+// ---------------------------------------------------------------------------
+
+const serverOnly = (p) => p.match(/^\\\\([\w.-]+)\\?$/)?.[1] ?? null; // „\\sugo“ → „sugo“
+/** Übergeordneter Ordner: \\Server\Freigabe → \\Server → Laufwerke */
+function parentOf(p) {
+  if (!p || serverOnly(p)) return '';
+  const root = shareRoot(p);
+  if (root && path.resolve(p) === path.resolve(root)) return root.split('\\').slice(0, 3).join('\\');
+  const up = path.dirname(p);
+  return up === p ? '' : up;
+}
+
+app.post('/api/browse', async (req, res) => {
+  const raw = String(req.body?.path ?? '').trim().replace(/\//g, process.platform === 'win32' ? '\\' : '/');
+  const user = String(req.body?.user ?? '').trim();
+  const win = process.platform === 'win32';
+  try {
+    // Laufwerke (Windows) bzw. Wurzel
+    if (!raw) {
+      if (!win) return res.json({ path: '/', parent: null, entries: await subfolders('/') });
+      const letters = 'CDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
+      const found = await Promise.all(letters.map((l) => isDir(l + ':\\').then((ok) => (ok ? { name: l + ':', path: l + ':\\', kind: 'drive' } : null))));
+      return res.json({ path: '', parent: null, entries: found.filter(Boolean) });
+    }
+    // Server: Freigaben auflisten (vorher anmelden, falls Benutzer angegeben)
+    const server = serverOnly(raw);
+    if (server) {
+      if (!win) return res.status(400).json({ error: 'Freigaben auflisten geht nur unter Windows – den Pfad bitte direkt eingeben' });
+      if (user) await netUse(`\\\\${server}\\IPC$`, user, String(req.body?.password ?? ''));
+      const shares = await listShares(server);
+      return res.json({ path: `\\\\${server}`, parent: '', entries: shares.map((name) => ({ name, path: `\\\\${server}\\${name}`, kind: 'share' })) });
+    }
+    // Ordner: bei Netzwerkpfad mit Benutzer erst an der Freigabe anmelden
+    const dir = path.resolve(raw);
+    if (user && isUnc(dir) && win) await netUse(shareRoot(dir), user, String(req.body?.password ?? ''));
+    res.json({ path: dir, parent: parentOf(dir), entries: await subfolders(dir) });
+  } catch (e) {
+    const msg = /Systemfehler|System error/i.test(e.message) ? netError(e.message) : e.code === 'ENOENT' ? 'Ordner nicht gefunden' : e.code === 'EACCES' || e.code === 'EPERM' ? 'Kein Zugriff – ggf. Benutzer und Kennwort angeben' : 'Nicht erreichbar: ' + e.message.split('\n')[0];
+    res.status(400).json({ error: msg });
+  }
+});
+
+/** Sichtbare Unterordner (ohne versteckte und System-Ordner) */
+async function subfolders(dir) {
+  const entries = await fs.promises.readdir(dir, { withFileTypes: true });
+  return entries
+    .filter((e) => e.isDirectory() && !e.name.startsWith('.') && !e.name.startsWith('$') && !/^(System Volume Information|\$RECYCLE\.BIN)$/i.test(e.name))
+    .map((e) => ({ name: e.name, path: path.join(dir, e.name), kind: 'folder' }))
+    .sort((a, b) => a.name.localeCompare(b.name, 'de', { numeric: true }));
+}
+
 // Medienquellen verwalten
 app.post('/api/media-sources', async (req, res) => {
   const raw = String(req.body?.path ?? '').trim();
   if (!raw) return res.status(400).json({ error: 'Pfad fehlt' });
   const dir = path.resolve(raw);
-  if (!(await isDir(dir))) return res.status(400).json({ error: `Ordner nicht gefunden oder nicht erreichbar: ${raw}` });
   if (state.settings.mediaSources.some((m) => path.resolve(m.path) === dir)) return res.status(400).json({ error: 'Dieser Ordner ist schon eingebunden' });
   const source = { id: newId(), name: String(req.body?.name ?? '').trim().slice(0, 60) || path.basename(dir) || dir, path: dir };
+  // Optional Benutzer und Kennwort für eine Netzwerkfreigabe: erst anmelden, dann prüfen
+  const user = String(req.body?.user ?? '').trim();
+  if (user) {
+    if (!isUnc(dir)) return res.status(400).json({ error: 'Eine Anmeldung ist nur für Netzwerkpfade (\\\\Server\\Freigabe) möglich' });
+    const err = await setSourceAuth(source, user, String(req.body?.password ?? ''));
+    if (err) return res.status(400).json({ error: err });
+  }
+  if (!(await isDir(dir))) return res.status(400).json({ error: `Ordner nicht gefunden oder nicht erreichbar: ${raw}` });
   state.settings.mediaSources.push(source);
   changed();
-  res.json(source);
+  res.json(sourcesForAdmin().find((m) => m.id === source.id));
 });
 
-app.patch('/api/media-sources/:id', (req, res) => {
+/** Anmeldung setzen (Kennwort verschlüsselt) und testen; Fehlertext oder null */
+async function setSourceAuth(source, user, password) {
+  if (process.platform !== 'win32') return 'Anmeldung an Netzwerkfreigaben wird nur unter Windows unterstützt – die Freigabe bitte im System einbinden';
+  const auth = { user: user.slice(0, 120) };
+  try {
+    if (password) auth.secret = await encryptSecret(password);
+  } catch (e) {
+    return 'Kennwort konnte nicht verschlüsselt werden: ' + e.message;
+  }
+  const err = await connectShare({ ...source, auth });
+  if (err) return err;
+  source.auth = auth;
+  return null;
+}
+
+app.patch('/api/media-sources/:id', async (req, res) => {
   const source = mediaSource(req.params.id);
   if (!source) return res.status(404).json({ error: 'Nicht gefunden' });
   const name = String(req.body?.name ?? '').trim().slice(0, 60);
   if (name) source.name = name;
+  // Anmeldung: user (+ password) setzen, user: '' entfernt sie
+  if (typeof req.body?.user === 'string') {
+    const user = req.body.user.trim();
+    if (!user) delete source.auth;
+    else {
+      if (!isUnc(source.path)) return res.status(400).json({ error: 'Eine Anmeldung ist nur für Netzwerkpfade (\\\\Server\\Freigabe) möglich' });
+      const err = await setSourceAuth(source, user, String(req.body.password ?? ''));
+      if (err) return res.status(400).json({ error: err });
+    }
+  }
   changed();
-  res.json(source);
+  res.json(sourcesForAdmin().find((m) => m.id === source.id));
 });
 
 // Entfernt nur die Quelle; Playlist-Einträge daraus bleiben (sie kennen ihren vollständigen Pfad)
@@ -1491,11 +1819,31 @@ async function backfillHashes() {
 }
 
 app.post('/api/upload', upload.array('files'), async (req, res) => {
-  const skipDuplicates = (req.query.duplicates ?? state.settings.duplicates) !== 'add';
+  const result = await ingestUploads(req.files, targetList(req), (req.query.duplicates ?? state.settings.duplicates) !== 'add');
+  res.json(result);
+});
+
+// Fernbedienung (z. B. Smartphone): Fotos, Videos und Musik aus der Galerie in die aktive Playlist bzw.
+// Musikliste. Erlaubt nur dem steuernden Gerät mit seinem Schlüssel; das erste neue Bild/Video läuft sofort.
+app.post('/remote/upload', (req, res, next) => {
+  const ctrl = screenById(String(req.query.screen ?? ''));
+  if (ctrl?.remote?.role !== 'controller' || !safeEqual(String(req.query.key ?? ''), ctrl.remote.key ?? '')) return res.status(403).json({ error: 'Nur während der Fernsteuerung' });
+  req.ctrl = ctrl;
+  next();
+}, upload.array('files'), async (req, res) => {
+  const result = await ingestUploads(req.files, state.playlist, state.settings.duplicates !== 'add');
+  const first = result.added[0] ?? state.playlist.find((i) => i.title === result.skipped[0]?.existing);
+  if (first && req.ctrl.remote) remoteShow(req.ctrl, first.id);
+  changed();
+  res.json({ added: result.added.length, skipped: result.skipped.length, music: result.musicAdded.length, shown: first?.title ?? null });
+});
+
+/** Hochgeladene Dateien übernehmen: Audio → Musikliste, Bilder/Videos → list (doppelte ggf. aussortiert) */
+async function ingestUploads(files, list, skipDuplicates) {
   const added = [];
   const skipped = [];
   const musicAdded = [];
-  for (const f of req.files ?? []) {
+  for (const f of files ?? []) {
     // multer liefert den Dateinamen als latin1 – für Umlaute nach UTF-8 umwandeln
     const original = Buffer.from(f.originalname, 'latin1').toString('utf8');
     const hash = await hashFile(f.path);
@@ -1515,7 +1863,7 @@ app.post('/api/upload', upload.array('files'), async (req, res) => {
       continue;
     }
     // Doppelt = gleicher Inhalt wie ein Playlist-Eintrag oder eine Datei aus demselben Upload
-    const existing = targetList(req).find((i) => i.hash === hash) ?? added.find((i) => i.hash === hash);
+    const existing = list.find((i) => i.hash === hash) ?? added.find((i) => i.hash === hash);
     if (existing && skipDuplicates) {
       fs.rm(f.path, { force: true }, () => {});
       skipped.push({ name: original, existing: existing.title });
@@ -1536,11 +1884,11 @@ app.post('/api/upload', upload.array('files'), async (req, res) => {
       updatedAt: Date.now(),
     });
   }
-  targetList(req).push(...added);
-  if (added.length) redistributeAfterPlaylistChange();
+  list.push(...added);
+  if (added.length && list === state.playlist) redistributeAfterPlaylistChange();
   if (added.length || musicAdded.length) changed();
-  res.json({ added, skipped, musicAdded });
-});
+  return { added, skipped, musicAdded };
+}
 
 app.put('/api/playlist/order', (req, res) => {
   const ids = req.body?.ids ?? [];
@@ -2001,7 +2349,7 @@ app.put('/api/screens/order', (req, res) => {
   const ids = req.body?.ids ?? [];
   const pos = new Map(ids.map((id, i) => [id, i]));
   state.screens.sort((a, b) => (pos.get(a.id) ?? 1e9) - (pos.get(b.id) ?? 1e9));
-  if (state.settings.distribution === 'order') distribute();
+  if (!isSyncMode() && !isShuffle()) distribute();
   changed();
   res.json({ ok: true });
 });
@@ -2225,14 +2573,14 @@ app.post('/api/screens/:id/reload', (req, res) => {
 
 // --- Steuerung --------------------------------------------------------------
 
-app.patch('/api/settings', (req, res) => {
-  const { distribution, autoAdvance, interval } = req.body ?? {};
+app.patch('/api/settings', async (req, res) => {
+  const { autoAdvance, interval } = req.body ?? {};
   const s = state.settings;
-  let redistribute = false;
-  if (distribution === 'order' || distribution === 'random' || distribution === 'sync') {
-    redistribute = distribution !== s.distribution;
-    s.distribution = distribution;
-  }
+  // Verteilung: alle gleich bzw. jeder eigenes (distribution) und Reihenfolge (shuffle); 'random' = alte Angabe
+  const before = s.distribution + s.shuffle;
+  if (['order', 'random', 'sync'].includes(req.body?.distribution)) Object.assign(s, migrateSettings({ ...s, distribution: req.body.distribution }));
+  if (typeof req.body?.shuffle === 'boolean') s.shuffle = req.body.shuffle;
+  const redistribute = s.distribution + s.shuffle !== before;
   if (typeof autoAdvance === 'boolean') s.autoAdvance = autoAdvance;
   if (interval !== undefined) s.interval = Math.max(3, Math.min(86400, Number(interval) || 30));
   if (req.body?.duplicates === 'skip' || req.body?.duplicates === 'add') s.duplicates = req.body.duplicates;
@@ -2241,6 +2589,18 @@ app.patch('/api/settings', (req, res) => {
     for (const scr of state.screens) refreshImages(scr); // auch Menüanzeige „Standard (…)“
   }
   if (typeof req.body?.hostName === 'string') s.hostName = toHostName(req.body.hostName);
+  // Hauptport: gilt nach einem Neustart. Zusatz-Port: sofort neu starten und Ergebnis zurückmelden
+  if (req.body?.port !== undefined) {
+    const p = validPort(req.body.port);
+    if (!p || p < 1) return res.status(400).json({ error: 'Ungültiger Port (1–65535)' });
+    s.port = p;
+  }
+  if (req.body?.extraPort !== undefined) {
+    const p = validPort(req.body.extraPort);
+    if (p === null) return res.status(400).json({ error: 'Ungültiger Port (0–65535, 0 = aus)' });
+    s.extraPort = p;
+    if (!EXTRA_FROM_ENV) await listenExtra();
+  }
   if (typeof req.body?.screenMenu === 'boolean' || typeof req.body?.touchZoom === 'boolean') {
     if (typeof req.body.screenMenu === 'boolean') s.screenMenu = req.body.screenMenu;
     if (typeof req.body.touchZoom === 'boolean') s.touchZoom = req.body.touchZoom;
@@ -2293,6 +2653,19 @@ wss.on('connection', (ws, req) => {
       state.screens.push(screen);
       advanceScreens([id], 'Start');
     }
+    if (validPair(params.get('pair'))) {
+      screen.remoteAllowed = true;
+      if (!screen.remote) {
+        const targets = state.screens.filter((x) => x !== screen && isOnline(x.id) && x.remote?.role !== 'controller').map((x) => x.id);
+        setTimeout(() => {
+          const s = screenById(id);
+          if (s && !s.remote) {
+            startRemote(s, targets);
+            changed();
+          }
+        }, 300); // erst nach der ersten Anzeige, damit die Leiste sicher erscheint
+      }
+    }
     screen.ip = req.socket.remoteAddress?.replace(/^::ffff:/, '');
     screen.userAgent = req.headers['user-agent'];
     screen.lastSeen = Date.now();
@@ -2319,7 +2692,7 @@ wss.on('connection', (ws, req) => {
       else if (msg.type === 'progress') relayProgress(s, msg);
       else if (msg.type === 'ended') onItemEnded(s, msg);
       else if (msg.type === 'musicStatus' || msg.type === 'musicEnded') handleMusicMessage(s, msg);
-      else if (msg.type === 'remote' || msg.type === 'remoteList' || msg.type === 'remoteZoom' || msg.type === 'remoteDraw' || msg.type === 'remoteRotate' || msg.type === 'remoteSound') handleRemoteMessage(s, msg, ws);
+      else if (msg.type === 'remote' || msg.type === 'remoteList' || msg.type === 'remoteZoom' || msg.type === 'remoteDraw' || msg.type === 'remoteRotate' || msg.type === 'remoteSound' || msg.type === 'remotePlaylist') handleRemoteMessage(s, msg, ws);
       else if (msg.type === 'audio') {
         // Menü am Screen: Video-Ton an/aus und Lautstärke (wie in der Verwaltung)
         if (typeof msg.enabled === 'boolean') s.audio = msg.enabled;
@@ -2420,20 +2793,39 @@ restartTimer();
 backfillHashes();
 if (isSyncMode()) distribute(); // gemeinsame Startzeit gibt es nach einem Neustart nicht mehr
 
-/** Zweiter Port (Standard 80) mit derselben App; WebSocket-Verbindungen gehen an den Hauptserver */
-function listenExtra() {
-  return new Promise((resolve) => {
-    if (!EXTRA_PORT || EXTRA_PORT === PORT) return resolve(null);
+/**
+ * Zusatz-Port (Standard 80) mit derselben App, damit Adressen ohne bzw. mit anderem Port funktionieren.
+ * WebSocket-Verbindungen gehen an den Hauptserver. Belegt oder ohne Berechtigung: nur der Hauptport.
+ */
+let extraServer = null;
+let extraStatus = null; // { port, ok: true } | { port, error: 'EADDRINUSE' | 'EACCES' | … } | null (aus)
+async function listenExtra() {
+  if (extraServer) {
+    const old = extraServer;
+    extraServer = null;
+    await new Promise((resolve) => {
+      old.close(() => resolve());
+      old.closeAllConnections?.();
+    });
+  }
+  const port = extraPortSetting();
+  extraStatus = null;
+  if (port && port !== PORT) {
     const extra = http.createServer(app);
     extra.on('upgrade', (req, socket, head) => server.emit('upgrade', req, socket, head));
-    extra.once('error', (e) => resolve({ error: e.code }));
-    extra.listen(EXTRA_PORT, () => resolve({ ok: true }));
-  });
+    extraStatus = await new Promise((resolve) => {
+      extra.once('error', (e) => resolve({ port, error: e.code }));
+      extra.listen(port, () => resolve({ port, ok: true }));
+    });
+    if (extraStatus.ok) extraServer = extra;
+  }
+  shortPort = extraStatus?.ok ? port : PORT;
+  return extraStatus;
 }
 
 server.listen(PORT, async () => {
   const extra = await listenExtra();
-  shortPort = extra?.ok ? EXTRA_PORT : PORT;
+  const EXTRA_PORT = extra?.port;
   // Startmeldung in der Sprache des Systems
   const de = Intl.DateTimeFormat().resolvedOptions().locale.startsWith('de');
   const ports = extra?.ok ? `${PORT} + ${EXTRA_PORT}` : PORT;

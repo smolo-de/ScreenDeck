@@ -29,6 +29,9 @@
     .code .qr img { width: 100%; height: 100%; display: block; image-rendering: pixelated; }
     .code code { font-size: 15px; color: var(--accent); word-break: break-all; }
     .code p { margin: 0; color: var(--muted); font-size: 13px; }
+    .code.remote { border-color: var(--accent); }
+    .code p.warn { color: #b45309; }
+    @media (prefers-color-scheme: dark) { .code p.warn { color: #fbbf24; } }
   </style>
 </head>
 <body>
@@ -42,6 +45,12 @@
         <code id="screenUrl"></code>
         <p>Zeigt die Inhalte an. Im Menü (antippen) lässt sich z. B. die Fernsteuerung starten.</p>
       </section>
+      <section class="code remote" id="remoteCode" hidden>
+        <h2>📱 Smartphone als Fernbedienung</h2>
+        <div class="qr"><img alt=""></div>
+        <p>Scannen – das Smartphone steuert sofort alle verbundenen Screens: weiterschalten, Playlist mit Vorschaubildern, Fotos, Videos und Musik aus der Galerie hochladen.</p>
+        <p class="warn">Wer diesen Code hat, kann fernsteuern und hochladen. Nur zeigen, wem du das erlaubst – erneuern unter ⚙ Einstellungen → Screens.</p>
+      </section>
       <section class="code" id="adminCode" hidden>
         <h2>Verwaltung öffnen</h2>
         <div class="qr"><img alt=""></div>
@@ -51,12 +60,23 @@
     </div>
   </main>
   <script>
-    // Verwaltung nur, wenn die Seite aus der Verwaltung geöffnet wurde (?admin=1)
-    const withAdmin = new URLSearchParams(location.search).has('admin');
+    // Verwaltung nur, wenn die Seite aus der Verwaltung geöffnet wurde (?admin=1);
+    // ?remote=1 zeigt nur den Kopplungs-Code fürs Smartphone (den liefert der Server nur der Verwaltung)
+    const q = new URLSearchParams(location.search);
+    const withAdmin = q.has('admin');
+    const onlyRemote = q.has('remote');
     fetch('/connect.json')
       .then((r) => r.json())
       .then((u) => {
         document.getElementById('screenUrl').textContent = u.screen;
+        if (u.remote && (withAdmin || onlyRemote)) {
+          document.getElementById('remoteCode').hidden = false;
+          document.querySelector('#remoteCode img').src = '/qr.svg?for=remote&t=' + Date.now();
+        }
+        if (onlyRemote && u.remote) {
+          document.querySelector('.code:not(.remote)').hidden = true; // nur die Kopplung
+          document.querySelector('.hint').textContent = 'Mit der Kamera des Smartphones scannen.';
+        }
         if (!withAdmin) return;
         document.getElementById('adminCode').hidden = false;
         document.querySelector('#adminCode img').src = '/qr.svg?for=admin';

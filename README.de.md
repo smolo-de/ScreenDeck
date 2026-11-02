@@ -17,7 +17,7 @@ npm start          # oder: npm run dev (Neustart bei Änderungen)
 
 **Per QR-Code verbinden:** `http://<server>/connect` zeigt einen QR-Code mit der Screen-Adresse. Er enthält die IP-Adresse statt des Namens und klappt damit auch auf Android. Aus der Verwaltung („▦ QR-Code“ bei den Screen-Adressen) kommt ein zweiter Code für die Verwaltung dazu. Am Screen zeigt „Gerät verbinden“ im Menü den QR-Code direkt an, z. B. auf dem Fernseher, damit ein Smartphone ihn abscannen kann. Die Codes erzeugt der Server selbst, Internet ist nicht nötig.
 
-**Ohne Portangabe:** Der Server lauscht zusätzlich auf Port 80. Dann reicht `http://<IP-des-Servers>` bzw. `http://screendeck.local` ohne `:3000`. Ist Port 80 belegt (z. B. durch einen anderen Webserver), läuft alles wie gewohnt nur auf 3000, und die Konsole weist darauf hin. Abschalten mit `EXTRA_PORT=0`, anderer Port mit `EXTRA_PORT=8080`. Lässt die Windows-Firewall nur Port 3000 durch, muss Port 80 dort ebenfalls freigegeben werden.
+**Ohne Portangabe:** Der Server lauscht zusätzlich auf Port 80. Dann reicht `http://<IP-des-Servers>` bzw. `http://screendeck.local` ohne `:3000`. Ist Port 80 belegt (z. B. durch einen anderen Webserver), läuft alles wie gewohnt nur auf 3000, und die Konsole weist darauf hin. Unter **⚙ Einstellungen → Netzwerk → Ports** lässt sich der zusätzliche Port ändern (z. B. 8080, 0 = aus), das wirkt sofort und zeigt an, ob der Port frei ist. Dort ist auch der Hauptport einstellbar, er gilt nach einem Neustart. Die Umgebungsvariablen `PORT` und `EXTRA_PORT` haben Vorrang vor den Einstellungen. Lässt die Windows-Firewall nur Port 3000 durch, muss Port 80 dort ebenfalls freigegeben werden.
 
 **Name im Netzwerk:** Der Server ist zusätzlich als `http://screendeck.local` erreichbar, ohne IP-Adresse (mDNS). Das klappt mit Windows, macOS, iPhone/iPad und neueren Android-Geräten. Manche ältere Android-Fernseher kennen solche Namen nicht, dort die IP-Adresse verwenden. Den Namen änderst du unter ⚙ Einstellungen → „Name im Netzwerk“, leer schaltet es ab. Mit mehreren ScreenDeck-Servern im selben Netz bitte verschiedene Namen wählen.
 Tipp: Viele Router (z. B. Fritz!Box) machen Geräte auch selbst unter ihrem Namen erreichbar, etwa `http://<PC-Name>.fritz.box`. Das funktioniert auch auf älteren Fernsehern.
@@ -57,6 +57,9 @@ Optionale URL-Parameter:
   - Abschaltbar unter ⚙ Einstellungen („Zoomen per Fingergeste“). Mit Zoom wartet ein einzelnes Antippen kurz (0,3 s), ob ein zweites folgt.
 - **Fernsteuerung:** Ein Screen (z. B. ein Smartphone) steuert andere (z. B. den Fernseher). Im Menü „Fernsteuerung“ wählen, die mitlaufenden Screens antippen (vorausgewählt: alle verbundenen), „Starten“.
   - **Freigabe:** Nur Screens, die in der Verwaltung freigeschaltet sind (beim Screen „Fernsteuerung: erlaubt“, in der kompakten Ansicht unter ▾), zeigen den Knopf im Menü. Standard ist „gesperrt“. Wird die Freigabe entzogen, endet eine laufende Fernsteuerung sofort.
+  - **📱 Smartphone koppeln (schnell):** In der Verwaltung neben den Screen-Adressen „📱 Smartphone koppeln“ öffnen und den QR-Code scannen. Das Smartphone ist sofort Fernbedienung für alle verbundenen Screens, ohne Freischaltung und ohne Screen-PIN. Der Code enthält einen Schlüssel und wird nur der Verwaltung angezeigt. „Neuer Code“ unter ⚙ Einstellungen → Screens macht ihn ungültig, gekoppelte Geräte bleiben freigeschaltet (in der Screen-Liste sperrbar).
+  - **▦ Playlist** (in der Leiste): Vorschaubilder aller aktiven Einträge, der laufende ist blau umrandet. Antippen zeigt den Eintrag sofort auf allen gesteuerten Screens. Änderungen an der Playlist erscheinen von selbst. Oben lässt sich die **Playlist wechseln**, sie läuft dann sofort auf den gesteuerten Screens. **„＋ Neu“** legt eine leere Playlist an und spielt sie ab, danach landet alles Hochgeladene direkt darin. **🗑** schaltet den Löschmodus ein: Kacheln antippen wählt sie aus („Alle“ wählt alle bzw. keine), „Löschen (n)“ fragt einmal nach. Läuft ein gelöschter Eintrag gerade, zeigen die Screens den nächsten. Hochgeladene Dateien werden mitgelöscht, sofern keine andere Playlist sie verwendet, Dateien aus Medienordnern bleiben erhalten.
+  - **⤒ Hochladen** (in der Leiste): öffnet am Smartphone die Galerie bzw. Kamera. Fotos und Videos kommen in die aktive Playlist, Musik in die Musikliste, doppelte werden aussortiert. Das erste neue Bild/Video läuft sofort auf allen gesteuerten Screens. Oben zeigt ein Balken den Fortschritt. Nur das steuernde Gerät darf hochladen, abgesichert über einen Schlüssel, der mit der Fernsteuerung endet.
   - Alle beteiligten Screens zeigen denselben Eintrag, der automatische Wechsel ruht für sie. Die übrigen Screens laufen normal weiter.
   - Am steuernden Gerät erscheint unten eine Leiste: ‹ › schaltet durch die aktiven Einträge der Playlist, alternativ waagerecht wischen oder die Pfeiltasten. Dazu „Zoom zurücksetzen“ und ✕ (beenden).
   - **Zoom** am steuernden Gerät (zwei Finger, Verschieben, Doppeltippen) wird auf die gesteuerten Screens übertragen, bezogen auf das Bild. Auch bei anderem Seitenverhältnis (Smartphone hochkant, Fernseher quer) ist derselbe Bildpunkt in der Mitte.
@@ -112,7 +115,13 @@ Webseiten (iframe) steuern ihren Ton selbst und sind von der Einstellung nicht b
 Kommt innerhalb von 10 s keine Bestätigung, schickt der Server den Inhalt erneut (bis zu 3 Mal). Danach lässt er sich per „erneut senden“ manuell anstoßen.
 Videos werden laufend überwacht: Pausierte Videos werden neu gestartet, hängende als Fehler gemeldet.
 
-**Hinzufügen, Medien, Musik** (rechte Spalte): drei eigene Bereiche, jeder per Klick auf die Kopfzeile (▾/▸) einklappbar. Den Zustand merkt sich der Browser.
+**Hinzufügen, Medien, Musik** (rechte Spalte): drei eigene Bereiche, jeder per Klick auf die Kopfzeile (▾/▸) einklappbar. Den Zustand merkt sich der Browser. Auch die **Playlist** lässt sich so einklappen; sichtbar bleiben dann Auswahl, Status und „Auf Screens abspielen“.
+
+**Steuerleiste oben** (Verteilung, Auto-Wechsel, „Weiter ⏭“ für den nächsten Wechsel, Alle Screens): ein durchgehendes Band in einer Zeile direkt unter der Kopfzeile. Auf großen Bildschirmen bleibt es beim Scrollen stehen. Die Erklärung zur Verteilung blendet ⓘ ein und aus.
+
+**Aktuelle Position in der Playlist:** Einträge, die gerade auf einem verbundenen Screen zu sehen sind, haben einen grünen Rand und ein Abzeichen mit dem Screen-Namen (● Fernseher). „◉ Aktuelle Position“ springt dorthin, weitere Klicks gehen reihum durch alle angezeigten Einträge.
+
+**⚙ Einstellungen** öffnen sich als Fenster über der Seite, mit den Rubriken Screens, Netzwerk, Bildqualität, Medienquellen und Zugriffsschutz. Esc, ✕ oder ein Klick daneben schließt es. Die zuletzt gewählte Rubrik merkt sich der Browser.
 - **Hinzufügen:** Upload per Drag & Drop, Umgang mit doppelten Dateien, Webseite/URL und Text.
 - **Medien:** der Inhalt der **Medienquellen** bzw. der hochgeladenen Dateien (siehe unten).
 - **Musik:** siehe [Musik](#musik).
@@ -122,6 +131,8 @@ Videos werden laufend überwacht: Pausierte Videos werden neu gestartet, hängen
   - Jede Quelle bekommt einen Namen (umbenennbar). Beim Einbinden prüft der Server, ob der Ordner erreichbar ist.
   - Wird eine Quelle entfernt, bleiben die Dateien und die Playlist-Einträge daraus unberührt.
   - Netzlaufwerke müssen für das Benutzerkonto erreichbar sein, unter dem der Server läuft. Läuft er als Dienst oder „als Administrator“, sind verbundene Laufwerksbuchstaben oft unsichtbar, dann den Netzwerkpfad verwenden.
+  - **Ordner suchen:** „📂 Durchsuchen“ neben dem Pfad öffnet einen Ordner-Browser. Ohne Pfad zeigt er die Laufwerke, bei `\\Servername` (z. B. `\\sugo`) dessen Freigaben, danach die Unterordner. ⬆ geht eine Ebene höher, „✓ Diesen Ordner wählen“ übernimmt den Pfad und schlägt den Ordnernamen als Namen vor. Braucht der Server eine Anmeldung, vorher Benutzer und Kennwort eintragen.
+  - **Anmeldung an Freigaben (Windows):** Bei Netzwerkpfaden (`\\Server\Freigabe`) lassen sich Benutzer und Kennwort angeben, beim Einbinden oder später über 🔑. Der Server meldet sich damit per `net use` an, auch nach jedem Neustart. Das Kennwort wird mit dem Windows-Konto des Servers verschlüsselt (DPAPI) in `data/state.json` gespeichert und nie an die Oberfläche geschickt. Läuft der Server später unter einem anderen Konto, muss es neu eingegeben werden. Windows erlaubt je Server nur eine Anmeldung, alle Freigaben desselben Servers nutzen also denselben Benutzer. Unter Linux/macOS die Freigabe im System einbinden (mount).
 - Oben im Bereich wählst du die Quelle (oder „⬆ Hochgeladen“). Bilder und Videos darin werden mit Unterordnern, Vorschau und Suche aufgelistet.
 - Dateien **in die Playlist ziehen**: Eine Linie zeigt, wo der Eintrag landet. Alternativ ＋ (anhängen) oder „Alle hinzufügen“ für den ganzen Ordner. „✓ in Playlist“ markiert bereits enthaltene Dateien.
 - Die Dateien werden **nicht kopiert**, sondern direkt aus dem Ordner abgespielt. Wird ein Eintrag aus der Playlist gelöscht, bleibt die Originaldatei erhalten.
@@ -153,9 +164,15 @@ Videos werden laufend überwacht: Pausierte Videos werden neu gestartet, hängen
 - `▶ jetzt` spielt einen eingereihten Eintrag sofort ab, `✕` entfernt ihn, „leeren“ leert die Warteschlange.
 - Auch fest zugeordnete Screens spielen ihre Warteschlange ab und kehren danach zu ihrem festen Inhalt zurück.
 
-**Verteilung:**
-- **Der Reihe nach:** Screen 1 zeigt Eintrag 1, Screen 2 Eintrag 2 … Bei einem Wechsel bekommt jeder Screen den nächsten Eintrag, der nicht schon auf einem anderen Screen läuft.
-- **Zufall:** Jeder Screen bekommt einen zufälligen Eintrag. Doppelungen und Wiederholungen werden nach Möglichkeit vermieden.
+**Verteilung:** zwei unabhängige Schalter – *was* die Screens zeigen (**⇉ Alle gleich** oder **▦ Verschieden**) und *in welcher Reihenfolge* (**→ Der Reihe nach** oder **🎲 Zufall**). Damit gibt es vier Kombinationen:
+
+| | → Der Reihe nach | 🎲 Zufall |
+|---|---|---|
+| **▦ Verschieden** | Screen 1 zeigt Eintrag 1, Screen 2 Eintrag 2 … Bei einem Wechsel bekommt jeder Screen den nächsten Eintrag, der nicht schon auf einem anderen Screen läuft. | Jeder Screen bekommt einen zufälligen Eintrag. Doppelungen und Wiederholungen werden nach Möglichkeit vermieden. |
+| **⇉ Alle gleich** | Alle Screens zeigen denselben Eintrag und gehen gemeinsam durch die Playlist. | Alle Screens zeigen denselben Eintrag, bei jedem Wechsel einen zufälligen (nie zweimal hintereinander denselben). |
+
+ⓘ neben „Verteilung“ erklärt die gerade gewählte Kombination. Eine ältere Einstellung „Zufall“ wird beim Start als „Verschieden + Zufall“ übernommen.
+
 - **⇉ Alle gleich (Sync):** Alle Screens zeigen denselben Inhalt. Videos starten zu einem gemeinsamen Zeitpunkt, rund 2 s nach dem Wechsel, damit alle laden können. Danach führen die Screens ihre Position laufend nach. Kleine Abweichungen gleichen sie über eine minimal schnellere oder langsamere Wiedergabe aus, große per Sprung.
   - **Gemeinsam für alle:** „Weiter“, Warteschlange, Klick in den Fortschrittsbalken und Videoende gelten für die ganze Gruppe.
   - **Spät einsteigen:** Ein neu geladener oder später verbundener Screen steigt an der aktuellen Stelle ein.
