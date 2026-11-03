@@ -1,0 +1,28 @@
+# Wöchentliche Update-Vorschläge als Pull Request (Sicherheitsupdates kommen unabhängig davon sofort, wenn sie
+# in den Repo-Einstellungen unter „Dependabot security updates“ aktiviert sind).
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      npm-minor:
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ['*']
+
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+    ignore:
+      # bei der Node-Hauptversion bleiben – sie ist auch die der Windows- und Linux-Pakete
+      - dependency-name: node
+        update-types: ['version-update:semver-major']

@@ -1,0 +1,156 @@
+# Release: Tag „v1.2.3“ pushen → Tests, Pakete für Windows/Linux, Docker-Image, GitHub-Release.
+#
+#   git tag v1.2.3 && git push origin v1.2.3
+#
+# Tags mit Bindestrich (v1.2.3-beta.1) werden als Vorabversion veröffentlicht, ohne Docker-Tag „latest“.
+# Von Hand gestartet (workflow_dispatch) läuft alles als Probelauf: bauen und testen, nichts veröffentlichen.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  PUBLISH: ${{ startsWith(github.ref, 'refs/tags/v') }}
+
+jobs:
+  test:
+    uses: ./.github/workflows/ci.yml
+
+  packages:
+    name: Paket ${{ matrix.target }}
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Windows und Linux x64 auf ihrem eigenen System; ARM64 wird auf x64 gebaut und per QEMU getestet
+          # (ARM-Runner gibt es nicht für jedes Repo)
+          - { target: win-x64, os: windows-latest, archive: zip, program: ScreenDeck.exe }
+          - { target: linux-x64, os: ubuntu-latest, archive: tar.gz, program: screendeck }
+          - { target: linux-arm64, os: ubuntu-latest, archive: tar.gz, program: screendeck, emulate: linux/arm64 }
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Version aus dem Tag
+        if: env.PUBLISH == 'true'
+        run: npm version "${GITHUB_REF_NAME#v}" --no-git-tag-version --allow-same-version
+      - run: npm ci --no-audit --no-fund
+      - name: Paket bauen
+        run: npm run dist -- ${{ matrix.target }}
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+        if: matrix.emulate
+      - name: Archiv auspacken und Programm testen
+        run: |
+          check="$RUNNER_TEMP/check"
+          mkdir -p "$check"
+          if [ "${{ matrix.archive }}" = zip ]; then
+            /c/Windows/System32/tar.exe -xf dist/ScreenDeck-${{ matrix.target }}.zip -C "$check"
+          else
+            tar -xzf dist/ScreenDeck-${{ matrix.target }}.tar.gz -C "$check"
+          fi
+          program="ScreenDeck-${{ matrix.target }}/${{ matrix.program }}"
+          if [ -n "${{ matrix.emulate }}" ]; then
+            # fremde Architektur: Rauchtest in einem emulierten Container (glibc wie auf Debian/Raspberry Pi OS)
+            docker run --rm --platform ${{ matrix.emulate }} -e SMOKE_TIMEOUT=120               -v "$check:/check" -v "$PWD/scripts:/scripts:ro" node:24-slim               node /scripts/smoke-test.mjs "/check/$program"
+          else
+            node scripts/smoke-test.mjs "$check/$program"
+          fi
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ScreenDeck-${{ matrix.target }}
+          path: dist/ScreenDeck-${{ matrix.target }}.${{ matrix.archive }}
+          if-no-files-found: error
+          retention-days: 14
+
+  docker:
+    name: Docker-Image (amd64 + arm64)
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
+        id: meta
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/screendeck
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}},enable=${{ !startsWith(github.ref, 'refs/tags/v0.') }}
+            type=sha
+          flavor: latest=auto
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        if: env.PUBLISH == 'true'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Image bauen und veröffentlichen
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: ${{ env.PUBLISH == 'true' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  release:
+    name: GitHub-Release
+    needs: [packages, docker]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Prüfsummen
+        working-directory: dist
+        run: sha256sum ScreenDeck-* > SHA256SUMS.txt && cat SHA256SUMS.txt
+      - name: Release anlegen
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          IMAGE: ghcr.io/${{ github.repository_owner }}/screendeck
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          cat > notes.md <<EOF
+          ## Downloads
+
+          | System | Datei |
+          |---|---|
+          | Windows 10/11 (64 Bit) | \`ScreenDeck-win-x64.zip\` – auspacken, \`ScreenDeck.exe\` starten |
+          | Linux x64 | \`ScreenDeck-linux-x64.tar.gz\` |
+          | Linux ARM64 (z. B. Raspberry Pi 4/5) | \`ScreenDeck-linux-arm64.tar.gz\` |
+          | Docker | \`docker pull ${IMAGE,,}:${version}\` |
+
+          Keine weitere Installation nötig – Node.js ist im Programm enthalten. Prüfsummen: \`SHA256SUMS.txt\`.
+          EOF
+          flags=()
+          [[ "$GITHUB_REF_NAME" == *-* ]] && flags+=(--prerelease)
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --repo "$GITHUB_REPOSITORY" --title "ScreenDeck $version" \
+            --notes-file notes.md --generate-notes "${flags[@]}"
