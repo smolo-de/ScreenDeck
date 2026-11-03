@@ -7,10 +7,13 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <title>ScreenDeck Screen</title>
   <link rel="icon" href="/logo.svg" type="image/svg+xml">
+  <script src="/i18n.js?v={{VERSION}}"></script>
   <style>
     html, body { margin: 0; height: 100%; background: #000; color: #fff; overflow: hidden; cursor: none;
       font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
     #stage, .layer { position: fixed; inset: 0; }
+    /* Zoom per Fingergeste: der Browser soll weder die Seite zoomen noch scrollen */
+    body.touch-zoom { touch-action: none; }
     .layer { opacity: 0; transition: opacity .8s ease; display: flex; align-items: center; justify-content: center; }
     .layer.visible { opacity: 1; }
     .layer img, .layer video { width: 100%; height: 100%; object-fit: contain; }
@@ -53,15 +56,492 @@
       min-height: 10px; border-radius: 50%; background: #e33; z-index: 11; display: none; }
     #status.on { display: block; }
     #hint { position: fixed; left: 50%; bottom: 3vmin; transform: translateX(-50%); z-index: 11; font-size: 14px;
-      background: rgba(255,255,255,.12); padding: 8px 16px; border-radius: 20px; transition: opacity .5s; }
+      background: rgba(255,255,255,.12); padding: 8px 16px; border-radius: 20px; transition: opacity .5s; pointer-events: none; }
+
+    /* Menü (Antippen): schwebende Karte mit Name/Status und zwei Aktionen – ✕ blendet sofort aus */
+    body.menu-open { cursor: default; }
+    #menu { position: fixed; inset: auto 0 0 0; z-index: 20; display: flex; justify-content: center;
+      padding: clamp(12px, 3vmin, 40px); padding-top: 18vmin; background: linear-gradient(to top, rgba(0,0,0,.6), transparent);
+      font-size: clamp(14px, 1.7vmin, 24px); }
+    #menu[hidden] { display: none; }
+    .m-panel { position: relative; width: min(40em, 100%); display: grid; gap: 1.1em; padding: 1.3em; color: #f3f4f6;
+      background: rgba(22, 24, 30, .78); -webkit-backdrop-filter: blur(18px) saturate(1.4); backdrop-filter: blur(18px) saturate(1.4);
+      border: 1px solid rgba(255,255,255,.12); border-radius: 1.4em; box-shadow: 0 1.2em 3em rgba(0,0,0,.45);
+      animation: m-in .28s cubic-bezier(.2,.8,.2,1); }
+    @keyframes m-in { from { opacity: 0; transform: translateY(1.2em) scale(.98); } }
+    .m-head { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: .9em; align-items: center; padding-right: 2.6em; }
+    .m-logo { width: 2.8em; height: 2.8em; display: block; }
+    .m-name { font-size: 1.45em; font-weight: 700; line-height: 1.15; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .m-meta { display: flex; flex-wrap: wrap; align-items: center; gap: .35em .7em; margin-top: .3em; font-size: .82em; color: #a1a8b5; }
+    .m-conn { display: inline-flex; align-items: center; gap: .45em; padding: .2em .7em; border-radius: 99px; font-weight: 600; }
+    .m-conn::before { content: ""; width: .55em; height: .55em; border-radius: 50%; background: currentColor; }
+    .m-conn.ok { color: #4ade80; background: rgba(74, 222, 128, .12); }
+    .m-conn.err { color: #f87171; background: rgba(248, 113, 113, .12); }
+    .m-id { font-family: ui-monospace, Consolas, monospace; color: #d1d5db; }
+    .m-now { display: flex; align-items: center; gap: .6em; padding: .7em .9em; border-radius: .8em; background: rgba(255,255,255,.06);
+      font-size: .9em; color: #d1d5db; min-width: 0; }
+    .m-now svg { flex: none; width: 1.1em; height: 1.1em; opacity: .7; }
+    .m-now-body { flex: 1; min-width: 0; display: grid; gap: .5em; }
+    .m-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .m-progress { display: flex; align-items: center; gap: .8em; }
+    .m-progress[hidden] { display: none; }
+    .m-bar { flex: 1; height: .4em; border-radius: 99px; background: rgba(255,255,255,.14); overflow: hidden; }
+    .m-bar > div { height: 100%; width: 0; border-radius: 99px; background: #3b82f6; transition: width .25s linear; }
+    .m-time { font-size: .9em; font-variant-numeric: tabular-nums; color: #e5e7eb; white-space: nowrap; }
+    .m-actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(8em, 1fr)); gap: .7em; }
+    .m-actions a[hidden], .m-actions button[hidden] { display: none; }
+    .m-actions a { text-decoration: none; }
+    .m-actions button, .m-actions a { display: flex; align-items: center; justify-content: center; gap: .6em; min-height: 3.3em; padding: .6em 1em;
+      font: inherit; font-weight: 600; color: #fff; border-radius: .9em; cursor: pointer; transition: background .15s, transform .1s;
+      background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.14); }
+    .m-actions button:hover, .m-actions a:hover { background: rgba(255,255,255,.15); }
+    .m-actions button:active, .m-actions a:active { transform: scale(.97); }
+    .m-actions button.primary { background: #2563eb; border-color: #3b82f6; }
+    .m-actions button.primary:hover { background: #1d4ed8; }
+    .m-actions svg { width: 1.25em; height: 1.25em; flex: none; display: block; }
+    .m-close { position: absolute; top: 1em; right: 1em; width: 2.4em; height: 2.4em; display: grid; place-items: center; padding: 0;
+      border-radius: 50%; border: 1px solid rgba(255,255,255,.14); background: rgba(255,255,255,.08); color: #e5e7eb; cursor: pointer; }
+    .m-close:hover { background: rgba(255,255,255,.18); }
+    .m-close svg { width: 1.1em; height: 1.1em; }
+    /* Vollbild-Button: Symbol und Text je nach Zustand */
+    .m-fs-off { display: none; }
+    .is-fs .m-fs-on { display: none; }
+    .is-fs .m-fs-off { display: contents; }
+    /* Anhalten/Fortsetzen: nur im Modus Play oder wenn am Screen selbst angehalten */
+    .m-pause-off, .m-actions .m-pause-btn { display: none; }
+    .can-pause .m-actions .m-pause-btn { display: flex; }
+    .is-paused .m-pause-on { display: none; }
+    .is-paused .m-pause-off { display: contents; }
+    .m-paused { display: none; align-items: center; gap: .5em; padding: .6em .9em; border-radius: .8em; font-size: .9em; font-weight: 600;
+      color: #fbbf24; background: rgba(251, 191, 36, .12); }
+    .is-paused .m-paused { display: flex; }
+    .m-quality { display: flex; align-items: center; gap: .8em; font-size: .9em; color: #d1d5db; }
+    .m-quality span { flex: none; }
+    .m-quality select { flex: 1; min-width: 0; font: inherit; color: #fff; background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.14);
+      border-radius: .6em; padding: .45em .7em; }
+    .m-quality select option { color: #111; }
+    /* Bildqualität und Sprache gemeinsam als Fußzeile des Menüs */
+    .m-prefs { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr); gap: .8em; padding-top: .9em;
+      border-top: 1px solid rgba(255,255,255,.1); font-size: .9em; }
+    .m-prefs .m-quality { color: #a1a8b5; gap: .6em; }
+    .m-lang svg { width: 1.2em; height: 1.2em; flex: none; opacity: .8; }
+    .m-paused svg { width: 1.1em; height: 1.1em; flex: none; }
+    /* Gerät verbinden: QR-Code mit der Adresse dieses ScreenDeck */
+    .m-qr { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 1em; align-items: center; padding: .9em; border-radius: .9em; background: rgba(255,255,255,.06); }
+    .m-qr[hidden] { display: none; }
+    .m-qr img { width: 11em; height: 11em; padding: .5em; background: #fff; border-radius: .6em; image-rendering: pixelated; }
+    .m-qr b { display: block; margin-bottom: .3em; }
+    .m-qr p { margin: 0 0 .5em; font-size: .9em; color: #d1d5db; }
+    .m-qr code { font-size: .95em; color: #93c5fd; word-break: break-all; }
+    /* Fernsteuerung: Auswahl im Menü und Leiste am steuernden Gerät */
+    .m-remote { display: grid; gap: .7em; padding: .9em; border-radius: .9em; background: rgba(255,255,255,.06); }
+    .m-remote[hidden] { display: none; }
+    .m-remote-title { font-size: .9em; color: #d1d5db; }
+    .m-chips { display: flex; flex-wrap: wrap; gap: .5em; }
+    .m-chip { font: inherit; font-size: .9em; padding: .45em .9em; border-radius: 99px; cursor: pointer; color: #e5e7eb;
+      background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.18); }
+    .m-chip.on { color: #fff; background: #2563eb; border-color: #3b82f6; }
+    .m-chip.off { opacity: .55; }
+    .m-remote-actions { display: flex; gap: .6em; justify-content: flex-end; }
+    .m-remote-actions button { font: inherit; font-weight: 600; padding: .55em 1.1em; border-radius: .8em; cursor: pointer; color: #fff;
+      background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.14); }
+    .m-remote-actions button.primary { background: #2563eb; border-color: #3b82f6; }
+    .m-remote-actions button:disabled { opacity: .45; cursor: default; }
+    .m-remote-note { font-size: .85em; color: #9ca3af; }
+    #remoteBar { position: fixed; left: 50%; bottom: max(12px, env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 15;
+      display: flex; align-items: center; gap: 8px; padding: 8px; border-radius: 18px; font-size: 15px; color: #f3f4f6;
+      background: rgba(22, 24, 30, .82); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
+      border: 1px solid rgba(255,255,255,.14); box-shadow: 0 8px 24px rgba(0,0,0,.4); cursor: default; max-width: calc(100vw - 24px); }
+    #remoteBar[hidden] { display: none; }
+    #remoteBar button { width: 52px; height: 52px; display: grid; place-items: center; padding: 0; border-radius: 14px; cursor: pointer; color: #fff;
+      background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.14); }
+    #remoteBar button:active { transform: scale(.95); }
+    #remoteBar button.primary { background: #2563eb; border-color: #3b82f6; }
+    #remoteBar button[hidden] { display: none; }
+    #remoteBar svg { width: 24px; height: 24px; }
+    #remoteBar .rb-info { display: grid; min-width: 0; padding: 0 6px; line-height: 1.25; }
+    #remoteBar .rb-info b { font-size: 12px; font-weight: 600; color: #93c5fd; white-space: nowrap; }
+    #remoteBar .rb-info span { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 34vw; }
+    body.remote-ctrl { cursor: default; }
+    #remoteBar .rb-sep { width: 1px; align-self: stretch; margin: 6px 0; background: rgba(255,255,255,.15); }
+    #remoteBar button.on { background: #f59e0b; border-color: #fbbf24; color: #111; }
+    #remoteBar { flex-wrap: wrap; justify-content: center; }
+    #remoteBar .rb-break { display: none; }
+    @media (max-width: 560px) {
+      #remoteBar { gap: 5px; padding: 6px; }
+      #remoteBar button { width: 42px; height: 42px; border-radius: 12px; }
+      #remoteBar .rb-info { display: none; }
+      /* Smartphone: zwei Zeilen – oben Steuern, Playlist, Hochladen; unten Werkzeuge */
+      #remoteBar { width: calc(100vw - 24px); box-sizing: border-box; }
+      #remoteBar .rb-break { display: block; flex-basis: 100%; height: 0; }
+      #remoteBar .rb-sep { display: none; }
+    }
+    /* Felder über der Leiste: Abstand nach deren Höhe (am Smartphone zwei Zeilen) */
+    #soundBar, #penBar, #listBar { bottom: calc(max(12px, env(safe-area-inset-bottom)) + var(--rb-h, 68px) + 10px) !important; }
+    /* Playlist mit Vorschaubildern */
+    #listBar { position: fixed; left: 50%; transform: translateX(-50%); z-index: 15; display: grid; gap: 8px; padding: 10px 12px 12px;
+      width: min(680px, calc(100vw - 24px)); box-sizing: border-box; border-radius: 16px; color: #f3f4f6;
+      background: rgba(22, 24, 30, .9); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
+      border: 1px solid rgba(255,255,255,.14); box-shadow: 0 8px 24px rgba(0,0,0,.4); }
+    #listBar[hidden] { display: none; }
+    .lb-head { display: flex; align-items: center; gap: 8px; font-size: 14px; min-width: 0; }
+    .lb-select { flex: 1; min-width: 0; height: 36px; padding: 0 8px; border-radius: 10px; font: inherit; font-weight: 600; color: #fff;
+      background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.16); text-overflow: ellipsis; }
+    .lb-select option { background: #1f2937; color: #fff; }
+    .lb-count { color: #9ca3af; font-size: 12.5px; white-space: nowrap; }
+    .lb-head button, .lb-newform button { height: 36px; padding: 0 12px; border-radius: 10px; font: inherit; font-size: 14px; font-weight: 600; cursor: pointer;
+      color: #fff; background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.16); white-space: nowrap; }
+    .lb-newform { display: flex; gap: 6px; }
+    .lb-newform[hidden] { display: none; }
+    .lb-newname { flex: 1; min-width: 0; height: 36px; padding: 0 10px; border-radius: 10px; font: inherit; color: #fff;
+      background: rgba(255,255,255,.08); border: 1px solid #3b82f6; outline: none; }
+    .lb-newform .lb-ok { background: #2563eb; border-color: #3b82f6; }
+    .lb-scroll { max-height: min(46vh, 420px); overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; border-radius: 9px; }
+    .lb-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 6px; }
+    /* Höhe über einen Platzhalter (16:10) statt aspect-ratio – das kennen ältere Safari/Android-Browser auf Knöpfen nicht,
+       dann fielen die Kacheln zusammen und die Bilder lagen übereinander */
+    .lb-item { position: relative; display: block; width: 100%; height: auto; padding: 0; overflow: hidden; border-radius: 9px;
+      cursor: pointer; color: #fff; background: #1f2937; border: 2px solid transparent; font: inherit; -webkit-appearance: none; appearance: none; }
+    .lb-item::before { content: ''; display: block; padding-top: 62.5%; }
+    .lb-item img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
+    .lb-empty { padding: 18px 8px; text-align: center; color: #9ca3af; font-size: 14px; }
+    /* Projektions-Maske am Screen */
+    #maskLayer { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 6; pointer-events: none; }
+    /* Masken-Editor an der Fernbedienung */
+    #maskBar { position: fixed; left: 50%; transform: translateX(-50%); z-index: 15; display: grid; gap: 8px; padding: 10px 12px 12px;
+      width: min(680px, calc(100vw - 24px)); box-sizing: border-box; border-radius: 16px; color: #f3f4f6; font-size: 14px;
+      background: rgba(22, 24, 30, .94); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
+      border: 1px solid rgba(255,255,255,.14); box-shadow: 0 8px 24px rgba(0,0,0,.4);
+      bottom: calc(max(12px, env(safe-area-inset-bottom)) + var(--rb-h, 68px) + 10px); }
+    #maskBar[hidden] { display: none; }
+    .mk-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
+    .mk-label { color: #9ca3af; font-size: 13px; }
+    .mk-screens { font-size: 13px; }
+    .mk-stage { position: relative; margin: 0 auto; border-radius: 8px; overflow: hidden; background: #0b0d12 center / contain no-repeat;
+      outline: 1px solid rgba(255,255,255,.18); touch-action: none; }
+    .mk-svg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+    .mk-tools button, .mk-foot button { height: 38px; min-width: 38px; padding: 0 10px; border-radius: 10px; font: inherit; font-weight: 600; cursor: pointer;
+      color: #fff; background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.16); touch-action: manipulation; }
+    .mk-tools button.primary { background: #2563eb; border-color: #3b82f6; }
+    .mk-tools button:disabled { opacity: .35; }
+    .mk-tools button[hidden] { display: none; }
+    .mk-sep { flex: 1; }
+    .mk-nudge { font-size: 16px; padding: 0 !important; width: 38px; }
+    .mk-foot { justify-content: space-between; }
+    .mk-on { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+    .mk-softrow { flex-wrap: nowrap; gap: 10px; }
+    .mk-softrow input { flex: 1; min-width: 0; accent-color: #3b82f6; }
+    .mk-softval { width: 2.2em; text-align: right; font-variant-numeric: tabular-nums; color: #e5e7eb; }
+    .mk-on input { width: 18px; height: 18px; accent-color: #3b82f6; }
+    /* einzeilig, damit die Zeichenfläche beim Zeichnen nicht springt */
+    .mk-hint { flex: 1; min-width: 0; color: #9ca3af; font-size: 12.5px; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .mk-tools { flex-wrap: nowrap; gap: 5px; }
+    /* schmale Smartphones: Hinweis in eigener Zeile unter den Schaltern (immer einzeilig) */
+    @media (max-width: 440px) { .mk-foot { flex-wrap: wrap; } .mk-foot .mk-hint { order: 3; flex-basis: 100%; text-align: left; } }
+    .mk-tools button { white-space: nowrap; flex: none; }
+    .mk-arrows { display: flex; gap: 5px; margin-left: auto; }
+    .mk-shapes { display: flex; gap: 3px; padding: 2px; border-radius: 12px; background: rgba(255,255,255,.06); }
+    .mk-shapes button { width: 38px; padding: 0 !important; font-size: 18px; line-height: 1; }
+    .mk-shapes button.on { background: #2563eb; border-color: #93c5fd; }
+    .mk-shapes[hidden] { display: none; }
+    .mk-tools .mk-scale { font-size: 18px; }
+    .mk-tools .mk-scale.on { background: #7c3aed; border-color: #c4b5fd; }
+    #maskBar.scaling .mk-nudge:not(:disabled) { border-color: #c4b5fd; }
+    /* schmale Smartphones: Pfeile in eine eigene Zeile (fester Aufbau, springt beim Zeichnen nicht) */
+    @media (max-width: 440px) { .mk-tools { flex-wrap: wrap; } .mk-arrows { width: 100%; justify-content: space-between; } .mk-arrows .mk-nudge { flex: 1; } }
+    /* Löschmodus */
+    .lb-head .lb-del { padding: 0 10px; }
+    #listBar.del-mode .lb-del { background: #dc2626; border-color: #f87171; }
+    .lb-delbar { display: flex; align-items: center; gap: 6px; }
+    .lb-delbar[hidden] { display: none; }
+    .lb-delhint { flex: 1; min-width: 0; font-size: 13px; color: #fca5a5; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .lb-delbar button { height: 34px; padding: 0 11px; border-radius: 10px; font: inherit; font-size: 13.5px; font-weight: 600; cursor: pointer; color: #fff;
+      background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.16); white-space: nowrap; }
+    .lb-delbar .lb-delgo { background: #dc2626; border-color: #f87171; }
+    .lb-delbar .lb-delgo:disabled { opacity: .4; }
+    #listBar.del-mode .lb-item::after { content: '✕'; position: absolute; top: 4px; right: 4px; width: 20px; height: 20px; display: grid; place-items: center;
+      border-radius: 50%; font-size: 11px; background: rgba(0,0,0,.6); color: #fff; }
+    #listBar.del-mode .lb-item.sel { border-color: #ef4444; }
+    #listBar.del-mode .lb-item.sel::after { background: #ef4444; content: '✓'; }
+    #listBar.del-mode .lb-item.sel img, #listBar.del-mode .lb-item.sel .lb-t { opacity: .45; }
+    #listBar.del-mode .lb-item.on { box-shadow: none; }
+    /* Rückfrage */
+    #lbAsk { margin: auto; box-sizing: border-box; width: min(380px, calc(100vw - 40px)); padding: 20px; border-radius: 16px; color: #f3f4f6; background: #1b1e25;
+      border: 1px solid rgba(255,255,255,.16); box-shadow: 0 20px 50px rgba(0,0,0,.5); font-size: 15px; }
+    #lbAsk::backdrop { background: rgba(0,0,0,.55); }
+    #lbAsk .ask-q { margin: 0 0 8px; font-weight: 600; font-size: 16px; }
+    #lbAsk .ask-note { margin: 0; color: #9ca3af; font-size: 13px; }
+    #lbAsk .ask-btns { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
+    #lbAsk button { height: 40px; padding: 0 16px; border-radius: 10px; font: inherit; font-weight: 600; cursor: pointer; color: #fff;
+      background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.16); }
+    #lbAsk button.danger { background: #dc2626; border-color: #f87171; }
+    #remoteBar button.hint { animation: rbhint 1.2s ease-in-out 3; }
+    @keyframes rbhint { 50% { background: #2563eb; border-color: #93c5fd; transform: scale(1.08); } }
+    .lb-item .lb-t { position: absolute; inset: 0; display: grid; place-items: center; padding: 4px; font-size: 11px; line-height: 1.2; text-align: center;
+      overflow: hidden; word-break: break-word; }
+    .lb-item .lb-type { position: absolute; left: 4px; bottom: 4px; padding: 0 5px; border-radius: 6px; font-size: 10px; background: rgba(0,0,0,.6); }
+    .lb-item.on { border-color: #3b82f6; box-shadow: 0 0 0 2px rgba(59,130,246,.45); }
+    .lb-item:active { transform: scale(.97); }
+    /* Hochladen: Fortschritt oben */
+    #upStatus { position: fixed; left: 50%; top: max(12px, env(safe-area-inset-top)); transform: translateX(-50%); z-index: 16; padding: 8px 14px;
+      border-radius: 99px; font-size: 14px; color: #fff; background: rgba(22, 24, 30, .9); border: 1px solid rgba(255,255,255,.16);
+      box-shadow: 0 6px 18px rgba(0,0,0,.4); white-space: nowrap; max-width: calc(100vw - 24px); overflow: hidden; text-overflow: ellipsis; }
+    #upStatus[hidden] { display: none; }
+    #upStatus .bar { display: block; height: 3px; margin-top: 5px; border-radius: 2px; background: #3b82f6; transition: width .2s; }
+    /* Ton der gesteuerten Screens: Musik (mit Titelwahl) und Video-Ton */
+    #soundBar { position: fixed; left: 50%; bottom: calc(max(12px, env(safe-area-inset-bottom)) + 80px); transform: translateX(-50%); z-index: 15;
+      display: grid; gap: 10px; padding: 12px 14px; border-radius: 16px; font-size: 15px; width: min(440px, calc(100vw - 24px)); box-sizing: border-box;
+      background: rgba(22, 24, 30, .88); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
+      border: 1px solid rgba(255,255,255,.14); box-shadow: 0 8px 24px rgba(0,0,0,.4); color: #f3f4f6; }
+    #soundBar[hidden] { display: none; }
+    #soundBar .m-vol { grid-template-columns: auto minmax(4.5em, max-content) minmax(0, 1fr) 3em; }
+    .sb-track { display: flex; align-items: center; gap: 8px; min-width: 0; }
+    .sb-track[hidden] { display: none; }
+    .sb-track .m-mute { flex: none; }
+    .sb-track .m-mute.primary { background: #2563eb; border-color: #3b82f6; }
+    .sb-title { min-width: 0; flex: 1; font-size: 13px; color: #9ca3af; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .sb-title b { color: #e5e7eb; font-weight: 600; }
+    .sb-note { font-size: 12px; color: #9ca3af; }
+    .sb-head { font-size: 13px; color: #9ca3af; margin-bottom: -4px; }
+    #soundBar .sb-disabled { opacity: .4; pointer-events: none; }
+    .sb-beh { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 13.5px; color: #d1d5db;
+      padding-top: 10px; border-top: 1px solid rgba(255,255,255,.1); }
+    .sb-beh select { font: inherit; color: #fff; background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.14); border-radius: 10px; padding: 6px 8px; min-width: 0; }
+    .sb-beh select option { background: #1f2937; }
+    .sb-icon { width: 2.6em; height: 2.6em; display: grid; place-items: center; color: #9ca3af; }
+    .sb-icon svg { width: 1.25em; height: 1.25em; }
+    .sb-screens { font-size: 14px; max-height: 6.5em; overflow-y: auto; }
+    .sb-note[hidden] { display: none; }
+    /* Drehung (Fernsteuerung): Bild/Video im Uhrzeigersinn in Vierteldrehungen */
+    .layer > .rotated { flex: none; }
+    /* Stift: Werkzeugleiste über der Fernsteuerungs-Leiste, Striche liegen auf dem Bild (zoomen mit) */
+    #penBar { position: fixed; left: 50%; bottom: calc(max(12px, env(safe-area-inset-bottom)) + 80px); transform: translateX(-50%); z-index: 15;
+      display: flex; align-items: center; gap: 6px; padding: 7px 9px; border-radius: 16px;
+      background: rgba(22, 24, 30, .82); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
+      border: 1px solid rgba(255,255,255,.14); box-shadow: 0 8px 24px rgba(0,0,0,.4); max-width: calc(100vw - 24px); }
+    #penBar[hidden] { display: none; }
+    #penBar button { width: 38px; height: 38px; display: grid; place-items: center; padding: 0; border-radius: 50%; cursor: pointer; color: #fff;
+      background: transparent; border: 2px solid transparent; }
+    #penBar .pen-color i { width: 24px; height: 24px; border-radius: 50%; background: var(--c); box-shadow: inset 0 0 0 1px rgba(0,0,0,.35); }
+    #penBar .pen-size i { border-radius: 50%; background: #e5e7eb; }
+    #penBar button.on { border-color: #fff; background: rgba(255,255,255,.12); }
+    #penBar .pen-undo { border-radius: 12px; background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.14); }
+    #penBar .pen-undo:disabled { opacity: .35; }
+    #penBar svg { width: 22px; height: 22px; }
+    #penBar .pen-sep { width: 1px; align-self: stretch; margin: 4px 2px; background: rgba(255,255,255,.15); }
+    body.pen-on { cursor: crosshair; }
+    .layer > svg.ink { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
+
+    /* Ton: Video-Ton und Musik je mit Stumm-Schalter und Lautstärke */
+    .m-sound { display: grid; gap: .55em; }
+    .m-vol { display: grid; grid-template-columns: auto minmax(5.5em, max-content) minmax(0, 1fr) 3.4em; align-items: center; gap: .8em; font-size: .9em; color: #d1d5db; }
+    .m-vol[hidden] { display: none; }
+    .m-mute { width: 2.6em; height: 2.6em; display: grid; place-items: center; padding: 0; border-radius: .7em; cursor: pointer; color: #fff;
+      background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.14); transition: background .15s, transform .1s; }
+    .m-mute:hover { background: rgba(255,255,255,.15); }
+    .m-mute:active { transform: scale(.94); }
+    .m-mute svg { width: 1.25em; height: 1.25em; display: block; }
+    .m-mute .m-off, .m-vol.muted .m-mute .m-on { display: none; }
+    .m-vol.muted .m-mute .m-off { display: block; }
+    .m-vol.muted .m-mute { color: #f87171; background: rgba(248,113,113,.12); border-color: rgba(248,113,113,.35); }
+    .m-vol input { width: 100%; margin: 0; accent-color: #3b82f6; cursor: pointer; }
+    .m-vol.muted input, .m-vol.muted .m-vol-val { opacity: .4; }
+    .m-vol-val { text-align: right; font-variant-numeric: tabular-nums; color: #e5e7eb; }
   </style>
 </head>
 <body>
   <div id="stage"><div class="layer"></div><div class="layer"></div></div>
   <div id="cover"></div>
+  <!-- Projektions-Maske: schwarze Bereiche über allem Inhalt; beim Bearbeiten mit Drahtgitter -->
+  <svg id="maskLayer" aria-hidden="true"></svg>
   <div id="ident"></div>
   <div id="status" title="Keine Verbindung zum Server"></div>
-  <div id="hint">Tippen für Vollbild</div>
+  <div id="hint">Tippen für Menü</div>
+  <div id="penBar" hidden></div>
+  <div id="soundBar" hidden>
+    <div class="sb-head">Ton steuern von:</div>
+    <div class="m-chips sb-screens"></div>
+    <div class="m-vol" data-kind="music">
+      <button class="m-mute" data-s="mute-music" title="Musik auf den gesteuerten Screens stumm/laut"><svg class="m-on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5 6 9H2v6h4l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M19 5a10 10 0 0 1 0 14"/></svg><svg class="m-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5 6 9H2v6h4l5 4z"/><path d="m22 9-6 6M16 9l6 6"/></svg></button>
+      <span>Musik</span>
+      <input type="range" min="0" max="100" step="5" data-s="vol-music" aria-label="Lautstärke Musik">
+      <span class="m-vol-val"></span>
+    </div>
+    <div class="sb-track">
+      <button class="m-mute" data-s="prev" title="Vorheriger Titel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 20 9 12l10-8zM5 19V5"/></svg></button>
+      <button class="m-mute primary" data-s="play" title="Musik abspielen/anhalten (alle Screens)"><svg class="sb-play" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 4l14 8-14 8z"/></svg><svg class="sb-pause" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></svg></button>
+      <button class="m-mute" data-s="next" title="Nächster Titel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 4 10 8-10 8zM19 5v14"/></svg></button>
+      <span class="sb-title" translate="no"></span>
+    </div>
+    <div class="m-vol" data-kind="video">
+      <button class="m-mute" data-s="mute-video" title="Video-Ton auf den gesteuerten Screens an/aus"><svg class="m-on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5 6 9H2v6h4l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M19 5a10 10 0 0 1 0 14"/></svg><svg class="m-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5 6 9H2v6h4l5 4z"/><path d="m22 9-6 6M16 9l6 6"/></svg></button>
+      <span>Video-Ton</span>
+      <input type="range" min="0" max="100" step="5" data-s="vol-video" aria-label="Lautstärke Video-Ton">
+      <span class="m-vol-val"></span>
+    </div>
+    <div class="sb-beh">
+      <span>Bei Video mit Ton</span>
+      <select data-s="behavior" aria-label="Musik bei Video mit Ton">
+        <option value="duck">leiser weiterspielen</option>
+        <option value="pause">pausieren</option>
+        <option value="none">nichts ändern</option>
+      </select>
+    </div>
+    <div class="m-vol" data-kind="duck" title="Lautstärke der Musik, solange ein Video mit Ton läuft">
+      <span class="sb-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5 6 9H2v6h4l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/></svg></span>
+      <span>Musik dabei</span>
+      <input type="range" min="0" max="100" step="5" data-s="duck" aria-label="Musik während Video mit Ton">
+      <span class="m-vol-val"></span>
+    </div>
+    <div class="sb-note">Lautstärke und Stumm gelten für den gewählten Screen. Titelwahl, Abspielen und das Verhalten bei Videos betreffen die Musik aller Screens.</div>
+  </div>
+  <!-- Fernbedienung: Playlist mit Vorschaubildern (antippen = auf allen gesteuerten Screens zeigen) -->
+  <div id="listBar" hidden>
+    <div class="lb-head">
+      <select class="lb-select" title="Playlist wechseln – läuft sofort auf den gesteuerten Screens, Hochladen landet darin" translate="no"></select>
+      <span class="lb-count"></span>
+      <button class="lb-new" data-l="new" title="Neue Playlist anlegen – Hochgeladenes landet direkt darin">＋ Neu</button>
+      <button class="lb-del" data-l="delmode" title="Einträge löschen: antippen zum Auswählen">🗑</button>
+    </div>
+    <!-- Löschmodus: Kacheln antippen = auswählen, dann einmal bestätigen -->
+    <div class="lb-delbar" hidden>
+      <span class="lb-delhint">Zum Löschen antippen</span>
+      <button data-l="delall">Alle</button>
+      <button class="lb-delgo" data-l="delgo" disabled>Löschen</button>
+      <button data-l="deldone">Fertig</button>
+    </div>
+    <div class="lb-newform" hidden>
+      <input type="text" class="lb-newname" placeholder="Name der neuen Playlist" maxlength="60" enterkeyhint="done">
+      <button class="lb-ok" data-l="create">Anlegen</button>
+      <button class="lb-x" data-l="cancel" title="Abbrechen">✕</button>
+    </div>
+    <!-- Scrollen im äußeren Container: im Raster selbst würde die Höhenbegrenzung die Zeilen zusammendrücken -->
+    <div class="lb-scroll"><div class="lb-grid"></div></div>
+  </div>
+  <!-- Masken-Editor (Fernbedienung): Bereiche zeichnen, Ecken ziehen, fein verschieben -->
+  <div id="maskBar" hidden>
+    <div class="mk-row"><span class="mk-label">Maske für</span><div class="m-chips mk-screens"></div></div>
+    <div class="mk-stage"><svg class="mk-svg"></svg></div>
+    <div class="mk-row mk-tools">
+      <span class="mk-shapes">
+        <button data-k="add" data-shape="poly" title="Freies Vieleck: Ecken antippen">⬠</button>
+        <button data-k="add" data-shape="rect" title="Rechteck: aufziehen oder antippen – danach jede Ecke einzeln verschiebbar">▭</button>
+        <button data-k="add" data-shape="ellipse" title="Kreis / Ellipse: aufziehen oder antippen (Kreis)">◯</button>
+        <button data-k="add" data-shape="tri" title="Dreieck: aufziehen oder antippen – danach jede Ecke einzeln verschiebbar">△</button>
+      </span>
+      <button data-k="close" class="primary" hidden>✓ Schließen</button>
+      <button data-k="undo" title="Beim Zeichnen: letzten Punkt zurücknehmen – sonst gewählten Punkt löschen">↶</button>
+      <button data-k="del" title="Gewählten Bereich löschen">🗑</button>
+      <button data-k="scale" class="mk-scale" title="Skalieren: ziehen = größer/kleiner um die Mitte, ← → Breite, ↑ ↓ Höhe (zwei Finger gehen immer)">⤢</button>
+      <span class="mk-arrows">
+        <button data-k="l" class="mk-nudge" title="Fein nach links">←</button>
+        <button data-k="u" class="mk-nudge" title="Fein nach oben">↑</button>
+        <button data-k="d" class="mk-nudge" title="Fein nach unten">↓</button>
+        <button data-k="r" class="mk-nudge" title="Fein nach rechts">→</button>
+      </span>
+    </div>
+    <div class="mk-row mk-softrow" title="Weiche Kanten: die Ränder der Bereiche laufen sanft aus (gilt für alle Bereiche dieses Screens)">
+      <span class="mk-label">Weiche Kanten</span>
+      <input type="range" min="0" max="50" step="1" value="0" data-k="soft" aria-label="Weiche Kanten">
+      <span class="mk-softval">0</span>
+    </div>
+    <div class="mk-row mk-foot">
+      <label class="mk-on"><input type="checkbox" data-k="on" checked> Maske aktiv</label>
+      <label class="mk-on" title="Umkehren: Inhalt nur innerhalb der Bereiche zeigen, außen nichts"><input type="checkbox" data-k="inv"> Umkehren</label>
+      <span class="mk-hint"></span>
+      <button data-k="clear">Alle löschen</button>
+    </div>
+  </div>
+  <!-- Rückfrage beim Löschen (eigenes Fenster statt Browser-Popup) -->
+  <dialog id="lbAsk">
+    <p class="ask-q"></p>
+    <p class="ask-note">Hochgeladene Dateien werden mitgelöscht, sofern keine andere Playlist sie verwendet. Dateien aus Medienordnern bleiben erhalten.</p>
+    <div class="ask-btns"><button data-a="no">Abbrechen</button><button data-a="yes" class="danger">Löschen</button></div>
+  </dialog>
+  <div id="upStatus" hidden></div>
+  <input type="file" id="upInput" multiple accept="image/*,video/*,audio/*" hidden>
+  <div id="remoteBar" hidden>
+    <button data-r="stop" title="Fernsteuerung beenden"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+    <span class="rb-sep"></span>
+    <button data-r="prev" title="Vorheriger Eintrag"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg></button>
+    <div class="rb-info"><b>Fernsteuerung</b><span class="rb-targets"></span></div>
+    <button data-r="next" class="primary" title="Nächster Eintrag"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"/></svg></button>
+    <button data-r="list" title="Playlist: Eintrag antippen und zeigen"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg></button>
+    <button data-r="upload" title="Fotos, Videos oder Musik von diesem Gerät hochladen"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 15V3M7 8l5-5 5 5"/><path d="M5 21h14"/></svg></button>
+    <span class="rb-break" aria-hidden="true"></span>
+    <button data-r="unzoom" title="Zoom zurücksetzen" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M8 11h6M21 21l-4.3-4.3"/></svg></button>
+    <button data-r="rotate" title="Bild drehen (90° im Uhrzeigersinn)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36L21 8"/><path d="M21 3v5h-5"/></svg></button>
+    <button data-r="pen" title="Stift: auf dem Bild zeichnen"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg></button>
+    <button data-r="mask" title="Maske: Bereiche eines Screens ausblenden (z. B. Fenster bei Beamer-Projektion)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 21V9l9-6 9 6v12z"/><rect x="7" y="12" width="4" height="4" fill="currentColor"/><rect x="13" y="12" width="4" height="4" fill="currentColor"/></svg></button>
+    <button data-r="sound" title="Ton der gesteuerten Screens"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5 6 9H2v6h4l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M19 5a10 10 0 0 1 0 14"/></svg></button>
+  </div>
+  <div id="menu" hidden>
+    <div class="m-panel" role="dialog" aria-label="Screen-Menü">
+      <button class="m-close" data-m="close" title="Ausblenden" aria-label="Ausblenden"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+      <div class="m-head">
+        <img class="m-logo" src="/logo.svg" alt="">
+        <div>
+          <div class="m-name"></div>
+          <div class="m-meta"><span class="m-conn"></span><span>ID <span class="m-id"></span></span></div>
+        </div>
+      </div>
+      <div class="m-now"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="4" width="20" height="14" rx="2"/><path d="M8 21h8M12 18v3"/></svg><div class="m-now-body"><span class="m-title"></span><div class="m-progress" hidden><div class="m-bar"><div></div></div><span class="m-time"></span></div></div></div>
+      <div class="m-sound">
+        <div class="m-vol" data-kind="video">
+          <button class="m-mute" data-m="mute-video"><svg class="m-on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5 6 9H2v6h4l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M19 5a10 10 0 0 1 0 14"/></svg><svg class="m-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5 6 9H2v6h4l5 4z"/><path d="m22 9-6 6M16 9l6 6"/></svg></button>
+          <span>Video-Ton</span>
+          <input type="range" min="0" max="100" step="5" data-m="vol-video" aria-label="Lautstärke Video-Ton">
+          <span class="m-vol-val"></span>
+        </div>
+        <div class="m-vol" data-kind="music">
+          <button class="m-mute" data-m="mute-music"><svg class="m-on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5 6 9H2v6h4l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M19 5a10 10 0 0 1 0 14"/></svg><svg class="m-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5 6 9H2v6h4l5 4z"/><path d="m22 9-6 6M16 9l6 6"/></svg></button>
+          <span>Musik</span>
+          <input type="range" min="0" max="100" step="5" data-m="vol-music" aria-label="Lautstärke Musik">
+          <span class="m-vol-val"></span>
+        </div>
+      </div>
+      <div class="m-paused"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></svg>Am Screen angehalten – die Verwaltung sieht das und kann fortsetzen</div>
+      <div class="m-qr" hidden>
+        <img alt="">
+        <div><b>Weiteres Gerät verbinden</b><p>Mit der Kamera des Smartphones oder Tablets scannen, oder die Adresse eintippen:</p><code class="m-qr-url"></code></div>
+      </div>
+      <div class="m-remote" hidden>
+        <div class="m-remote-title">Fernsteuerung: Welche Screens sollen mitlaufen?</div>
+        <div class="m-chips"></div>
+        <div class="m-remote-note"></div>
+        <div class="m-remote-actions">
+          <button data-m="remote-stop" hidden>Beenden</button>
+          <button class="primary" data-m="remote-start">Starten</button>
+        </div>
+      </div>
+      <div class="m-actions">
+        <button class="primary" data-m="fullscreen">
+          <span class="m-fs-on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3"/></svg></span>
+          <span class="m-fs-off"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3v3a2 2 0 0 1-2 2H3M21 8h-3a2 2 0 0 1-2-2V3M3 16h3a2 2 0 0 1 2 2v3M16 21v-3a2 2 0 0 1 2-2h3"/></svg></span>
+          <span class="m-fs-on">Vollbild</span><span class="m-fs-off">Vollbild beenden</span>
+        </button>
+        <button class="m-pause-btn" data-m="pause">
+          <span class="m-pause-on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></svg></span>
+          <span class="m-pause-off"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 4l14 8-14 8z"/></svg></span>
+          <span class="m-pause-on">Anhalten</span><span class="m-pause-off">Fortsetzen</span>
+        </button>
+        <a class="m-download" data-m="download" download hidden title="Aktuelles Bild/Video auf diesem Gerät speichern"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5"/><path d="M5 21h14"/></svg><span>Herunterladen</span></a>
+        <button data-m="qr" title="QR-Code zum Öffnen auf einem weiteren Gerät"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3h-3zM20 14v.01M14 20h.01M17 20h4v-3"/></svg><span>Gerät verbinden</span></button>
+        <button data-m="remote" hidden title="Andere Screens von diesem Gerät aus steuern"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="7" y="2" width="10" height="20" rx="2"/><path d="M11 18h2"/></svg><span>Fernsteuerung</span></button>
+        <button data-m="reload"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36L21 8"/><path d="M21 3v5h-5"/></svg><span>Neu laden</span></button>
+      </div>
+      <div class="m-prefs">
+        <label class="m-quality" title="Bildqualität, in der dieser Screen Bilder bekommt">
+          <span>Bildqualität</span>
+          <select data-m="quality"></select>
+        </label>
+        <label class="m-quality m-lang" translate="no" title="Sprache / Language">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg>
+          <select data-lang-select aria-label="Sprache / Language"><option value="de">Deutsch</option><option value="en">English</option></select>
+        </label>
+      </div>
+    </div>
+  </div>
 
   <script src="/fonts.js?v={{VERSION}}"></script>
   <script>
@@ -92,7 +572,8 @@
 
     // audio: on | off | blocked (nur bei Videos, sonst null)
     // mode: tatsächlich angewendeter Modus (play | pause | image | dark)
-    const status = { itemId: null, updatedAt: null, state: 'loading', detail: null, audio: null, mode: 'play' };
+    // hasAudio: hat das Video überhaupt eine Tonspur? (null = noch unbekannt)
+    const status = { itemId: null, updatedAt: null, state: 'loading', detail: null, audio: null, hasAudio: null, mode: 'play' };
     let lastSent = '';
 
     function report(patch, always = false) {
@@ -135,6 +616,32 @@
       }
     }
 
+    // Tonspur vorhanden? Chrome zählt dekodierte Tondaten (auch stumm geschaltet), andere Browser kennen audioTracks/mozHasAudio
+    function detectAudioTrack(v, key) {
+      const check = (last) => {
+        if (key !== currentKey) return;
+        let has = v.audioTracks ? v.audioTracks.length > 0 : v.mozHasAudio;
+        if (has === undefined && v.webkitAudioDecodedByteCount !== undefined) {
+          // Ton wird vor dem Bild dekodiert: nach einer knappen Sekunde Wiedergabe ohne Tondaten gibt es keine Tonspur
+          has = v.webkitAudioDecodedByteCount > 0 ? true : v.currentTime > 0.7 ? false : undefined;
+        }
+        if (has !== undefined) report({ hasAudio: has });
+        else if (!last) setTimeout(() => check(true), 1500);
+      };
+      setTimeout(() => check(false), 1000);
+    }
+
+    // Ton-Einstellung sofort auf das laufende Video anwenden (auch im Sync-Modus)
+    function applyVideoAudio() {
+      const v = visibleVideo();
+      if (v && !v.paused) return startVideo(v);
+      if (v) {
+        v.volume = audio.volume / 100;
+        v.muted = !audio.enabled;
+      }
+      restartVisibleVideo();
+    }
+
     function visibleVideo() {
       const layer = layers[front];
       return layer.dataset.key === currentKey ? layer.querySelector('video') : null;
@@ -143,8 +650,166 @@
     async function restartVisibleVideo() {
       const v = visibleVideo();
       if (mode !== 'play' || !v || status.state === 'error') return;
+      if (syncInfo) return syncVideo(v); // Sync-Modus: an der gemeinsamen Position einsteigen
       if (await startVideo(v)) report({ state: 'playing', detail: null }); // startVideo prüft, ob noch aktuell
     }
+
+    // -----------------------------------------------------------------------
+    // Sync-Modus: alle Screens spielen denselben Inhalt ab einer gemeinsamen
+    // Startzeit (Serverzeit). Die Uhr des Geräts wird mit der des Servers
+    // abgeglichen, die Abspielposition laufend nachgeführt.
+    // -----------------------------------------------------------------------
+
+    let syncInfo = null; // { start } in Serverzeit (ms) oder null
+    let syncWaiting = false; // Video wartet auf den gemeinsamen Start
+    let syncTimer = null;
+    const offsets = []; // letzte Messungen Serverzeit - Gerätezeit
+
+    // Größter Wert der letzten Messungen = Messung mit der kürzesten Laufzeit im Netz
+    function noteServerTime(t) {
+      if (!t) return;
+      offsets.push(t - Date.now());
+      if (offsets.length > 10) offsets.shift();
+    }
+    const serverNow = () => Date.now() + (offsets.length ? Math.max(...offsets) : 0);
+    const syncPos = () => (serverNow() - syncInfo.start) / 1000; // Sollposition in Sekunden, negativ = noch nicht gestartet
+
+    async function syncVideo(v) {
+      clearTimeout(syncTimer);
+      syncWaiting = false;
+      if (!syncInfo || mode !== 'play') return;
+      const key = currentKey;
+      const pos = syncPos();
+      if (pos < 0) {
+        // Bis zum gemeinsamen Start am Anfang warten
+        syncWaiting = true;
+        v.pause();
+        v.currentTime = 0;
+        syncTimer = setTimeout(() => key === currentKey && syncVideo(v), -pos * 1000);
+        return;
+      }
+      if (isFinite(v.duration) && pos >= v.duration) return; // Runde ist schon vorbei, die Gruppe schaltet gleich weiter
+      if (Math.abs(v.currentTime - pos) > 0.3) v.currentTime = pos;
+      if (v.paused) {
+        const ok = await startVideo(v);
+        if (key === currentKey) report(ok ? { state: 'playing', detail: null } : { state: 'blocked', detail: 'Autoplay blockiert' });
+      }
+    }
+
+    function applySync() {
+      const v = visibleVideo();
+      if (v) syncVideo(v);
+      else if (textTimer && syncInfo) {
+        textTimer.elapsed = syncPos();
+        textTimer.done = false;
+      }
+    }
+
+    // Feinabgleich: kleine Abweichungen über die Abspielgeschwindigkeit, große per Sprung
+    setInterval(() => {
+      const v = visibleVideo();
+      if (!v) return;
+      if (!syncInfo || mode !== 'play' || v.paused || syncWaiting || !isFinite(v.duration)) {
+        v.playbackRate = 1;
+        return;
+      }
+      const pos = syncPos();
+      if (pos < 0 || pos >= v.duration - 0.2) return;
+      const diff = v.currentTime - pos; // > 0 = Screen ist voraus
+      if (Math.abs(diff) > 0.5) {
+        v.currentTime = pos;
+        v.playbackRate = 1;
+      } else if (Math.abs(diff) > 0.04) v.playbackRate = Math.min(1.1, Math.max(0.9, 1 - diff));
+      else v.playbackRate = 1;
+    }, 500);
+
+    // -----------------------------------------------------------------------
+    // Musik: unsichtbarer Audio-Player, synchron zu den anderen Screens (gemeinsame
+    // Startzeit in Serverzeit). Radio läuft live. Während eines Videos mit Ton ggf. leiser.
+    // -----------------------------------------------------------------------
+
+    const musicPlayer = new Audio();
+    musicPlayer.preload = 'auto';
+    let musicState = null; // letzte Meldung „music“ vom Server
+    let musicWait = null;
+    let musicReported = '';
+
+    function reportMusic(state) {
+      const json = JSON.stringify({ state, trackId: musicState?.track?.id ?? null, duration: isFinite(musicPlayer.duration) ? musicPlayer.duration : 0 });
+      if (json === musicReported) return;
+      musicReported = json;
+      send({ type: 'musicStatus', ...JSON.parse(json) });
+    }
+
+    async function applyMusic() {
+      clearTimeout(musicWait);
+      const m = musicState;
+      const active = m && m.enabled && m.playing && m.track;
+      if (!active) {
+        if (!musicPlayer.paused) musicPlayer.pause();
+        if (!m?.track || !m.enabled) {
+          musicPlayer.removeAttribute('src');
+          delete musicPlayer.dataset.track;
+        }
+        return reportMusic(m?.enabled ? 'paused' : 'off');
+      }
+      if (musicPlayer.dataset.track !== m.track.id) {
+        musicPlayer.dataset.track = m.track.id;
+        musicPlayer.src = m.track.src;
+      }
+      applyMusicVolume();
+      if (m.track.kind === 'file') {
+        const pos = (serverNow() - m.startedAt) / 1000;
+        if (pos < 0) {
+          // gemeinsamer Start: bis dahin am Anfang warten
+          musicPlayer.pause();
+          if (musicPlayer.currentTime > 0.1) musicPlayer.currentTime = 0;
+          musicWait = setTimeout(applyMusic, -pos * 1000);
+          return;
+        }
+        if (isFinite(musicPlayer.duration) && pos >= musicPlayer.duration) return; // Runde vorbei, Server schaltet weiter
+        if (Math.abs(musicPlayer.currentTime - pos) > 0.5) musicPlayer.currentTime = pos;
+      }
+      if (musicPlayer.paused) {
+        try {
+          await musicPlayer.play();
+          reportMusic('playing');
+        } catch {
+          reportMusic('blocked'); // Browser erlaubt Ton erst nach einmal Tippen
+        }
+      } else reportMusic('playing');
+    }
+
+    // Gesamtlautstärke × ggf. leiser wegen Video × eigene Lautstärke dieses Screens
+    function applyMusicVolume() {
+      const m = musicState;
+      if (!m) return;
+      musicPlayer.volume = (m.volume / 100) * (m.duck != null ? m.duck / 100 : 1) * ((m.screenVolume ?? 100) / 100);
+      musicPlayer.muted = !!m.muted;
+    }
+
+    musicPlayer.addEventListener('loadedmetadata', () => reportMusic(musicPlayer.paused ? 'loading' : 'playing'));
+    musicPlayer.addEventListener('error', () => musicState?.track && reportMusic('error'));
+    musicPlayer.addEventListener('ended', () => {
+      if (musicState?.track) send({ type: 'musicEnded', trackId: musicState.track.id, startedAt: musicState.startedAt });
+    });
+
+    // Feinabgleich der Position (nur Dateien; Radio ist live)
+    setInterval(() => {
+      const m = musicState;
+      if (!m?.enabled || !m.playing || m.track?.kind !== 'file' || musicPlayer.paused || !isFinite(musicPlayer.duration)) {
+        musicPlayer.playbackRate = 1;
+        return;
+      }
+      const pos = (serverNow() - m.startedAt) / 1000;
+      if (pos < 0 || pos >= musicPlayer.duration - 0.3) return;
+      const diff = musicPlayer.currentTime - pos;
+      if (Math.abs(diff) > 0.8) {
+        musicPlayer.currentTime = pos;
+        musicPlayer.playbackRate = 1;
+      } else if (Math.abs(diff) > 0.05) musicPlayer.playbackRate = Math.min(1.08, Math.max(0.92, 1 - diff));
+      else musicPlayer.playbackRate = 1;
+    }, 1000);
 
     // -----------------------------------------------------------------------
     // Modus: play = normal, pause = eingefroren, image = Standbild, dark = schwarz.
@@ -152,6 +817,7 @@
     // -----------------------------------------------------------------------
 
     let mode = 'play';
+    let modeBy = null; // 'screen' = am Screen selbst angehalten
     let standby = null; // Bildadresse
     let standbyStyle = null; // { text, font, color, position, edge }
 
@@ -224,8 +890,10 @@
         case 'video': {
           const el = document.createElement('video');
           // Keine Schleife: am Ende entscheidet der Server, was als Nächstes läuft
-          Object.assign(el, { src: item.src, autoplay: true, muted: true, playsInline: true });
+          // Im Sync-Modus nicht selbst starten, sondern zum gemeinsamen Zeitpunkt
+          Object.assign(el, { src: item.src, autoplay: !syncInfo, muted: true, playsInline: true });
           el.setAttribute('playsinline', '');
+          el.addEventListener('playing', () => detectAudioTrack(el, currentKey), { once: true });
           return el;
         }
         case 'url': {
@@ -250,6 +918,20 @@
         }
       }
       return document.createElement('div');
+    }
+
+    // Nächstes Bild vorab laden und dekodieren, damit der Wechsel ohne Ladezeit klappt
+    const preloaded = new Map(); // src -> Image (Verweis hält es im Speicher)
+    function preload(list) {
+      for (const src of list ?? []) {
+        if (preloaded.has(src)) continue;
+        const img = new Image();
+        img.decoding = 'async';
+        img.src = src;
+        img.decode?.().catch(() => {});
+        preloaded.set(src, img);
+      }
+      while (preloaded.size > 3) preloaded.delete(preloaded.keys().next().value);
     }
 
     const MEDIA_ERRORS = { 1: 'abgebrochen', 2: 'Netzwerkfehler', 3: 'Dekodierfehler', 4: 'Format nicht unterstützt' };
@@ -277,10 +959,13 @@
       const key = item ? item.id + ':' + item.updatedAt : 'none:' + screenName;
       if (key === currentKey && !force) return;
       currentKey = key;
+      currentTitle = item?.title ?? '';
+      currentItem = item ?? null;
+      markListCurrent(); // Playlist der Fernbedienung: aktuellen Eintrag hervorheben
       const my = ++token;
       const isCurrent = () => my === token;
       textTimer = null;
-      report({ itemId: item?.id ?? null, updatedAt: item?.updatedAt ?? null, state: 'loading', detail: null, audio: null });
+      report({ itemId: item?.id ?? null, updatedAt: item?.updatedAt ?? null, state: 'loading', detail: null, audio: null, hasAudio: null });
 
       const back = layers[1 - front];
       back.replaceChildren();
@@ -294,7 +979,20 @@
       const old = layers[front];
       old.classList.remove('visible');
       front = 1 - front;
-      setTimeout(() => { if (isCurrent()) old.replaceChildren(); }, 1000);
+      resetZoom(); // neuer Inhalt beginnt unvergrößert, der alte blendet vergrößert aus
+      rot = 0; // und ungedreht
+      remoteBar.querySelector('[data-r=rotate]').classList.remove('on');
+      remoteBar.querySelector('[data-r=rotate]').hidden = !rotatable();
+      if (strokes.length) {
+        strokes = [];
+        drawing = null;
+        layers[front].querySelector(':scope > svg.ink')?.remove();
+        updatePenBar();
+      }
+      setTimeout(() => {
+        old.style.transform = '';
+        if (isCurrent()) old.replaceChildren();
+      }, 1000);
 
       if (!item) return report({ state: 'idle' });
       if (result.error) return report({ state: 'error', detail: result.error });
@@ -308,6 +1006,7 @@
           send({ type: 'ended', itemId: item.id });
         };
         if (mode !== 'play') return report({ state: 'paused', detail: null }); // nicht automatisch starten
+        if (syncInfo) return syncVideo(el);
         const started = await startVideo(el);
         if (isCurrent()) {
           report(started ? { state: 'playing', detail: null } : { state: 'blocked', detail: 'Autoplay blockiert' });
@@ -320,7 +1019,9 @@
       } else {
         report({ state: 'showing', detail: null });
         if (item.type === 'text' && item.duration > 0) {
-          textTimer = { itemId: item.id, duration: item.duration, elapsed: 0, done: false, cd: el.querySelector('.cd') };
+          // Sync-Modus: Restzeit ab dem gemeinsamen Start (vor dem Start negativ)
+          const elapsed = syncInfo ? syncPos() : 0;
+          textTimer = { itemId: item.id, duration: item.duration, elapsed, done: false, cd: el.querySelector('.cd') };
         }
       }
     }
@@ -344,7 +1045,7 @@
       const t = textTimer;
       if (!t || t.done || mode !== 'play') return;
       t.elapsed = Math.min(t.duration, t.elapsed + dt);
-      if (t.cd) t.cd.textContent = fmtCountdown(t.duration - t.elapsed);
+      if (t.cd) t.cd.textContent = fmtCountdown(t.duration - Math.max(0, t.elapsed));
       if (t.elapsed < t.duration) return;
       t.done = true;
       if (ws?.readyState !== WebSocket.OPEN) { t.elapsed = 0; t.done = false; return; } // offline: von vorne
@@ -373,7 +1074,7 @@
     setInterval(() => {
       const layer = layers[front];
       const v = layer.querySelector('video');
-      if (!v || v.ended || mode !== 'play' || layer.dataset.key !== currentKey || status.state === 'error' || status.state === 'loading') return;
+      if (!v || v.ended || syncWaiting || mode !== 'play' || layer.dataset.key !== currentKey || status.state === 'error' || status.state === 'loading') return;
       if (v.paused) {
         const key = currentKey;
         startVideo(v).then((ok) => {
@@ -420,12 +1121,15 @@
       const proto = location.protocol === 'https:' ? 'wss' : 'ws';
       const qs = new URLSearchParams({ role: 'screen', id: screenId });
       if (params.get('name')) qs.set('name', params.get('name'));
+      if (params.get('pair')) qs.set('pair', params.get('pair')); // per QR gekoppelt: Fernbedienung starten
       ws = new WebSocket(`${proto}://${location.host}/ws?${qs}`);
       const statusDot = document.getElementById('status');
 
       ws.onopen = () => {
         statusDot.classList.remove('on');
         report({}, true); // aktuellen Stand nach (Wieder-)Verbindung melden
+        reportViewport(); // Seitenverhältnis für den Masken-Editor
+        if (!menu.hidden) updateMenu();
       };
       ws.onmessage = (e) => {
         const msg = JSON.parse(e.data);
@@ -434,12 +1138,67 @@
           document.title = msg.name + ' – ScreenDeck';
           if (msg.audio) audio = msg.audio;
           mode = msg.mode ?? 'play';
+          modeBy = msg.modeBy ?? null;
           standby = msg.standby;
           standbyStyle = msg.standbyStyle;
+          noteServerTime(msg.serverTime);
+          syncInfo = msg.sync ?? null;
+          setMenuEnabled(msg.menu);
+          setTouchZoom(msg.touchZoom);
+          remoteAllowed = !!msg.remoteAllowed;
+          setRemote(msg.remote);
+          setMasks(msg.mask);
+          quality = msg.quality ?? quality;
+          if (!menu.hidden) updateMenu();
+          preload(msg.preload);
           applyMode();
           show(msg.item, msg.force);
+          applySync(); // gleicher Inhalt wie bisher: nur an die (neue) gemeinsame Position anpassen
+        } else if (msg.type === 'music') {
+          noteServerTime(msg.serverTime);
+          musicState = msg;
+          applyMusic();
+          if (!menu.hidden) updateSoundMenu();
+        } else if (msg.type === 'remoteList') {
+          // Vorauswahl: bisherige Ziele, sonst alle verbundenen Screens
+          const any = msg.screens.some((x) => x.selected);
+          remoteChoice = msg.screens.map((x) => ({ ...x, on: any ? x.selected : x.online }));
+          updateRemoteBox();
+        } else if (msg.type === 'zoom') {
+          applyRemoteZoom(msg);
+        } else if (msg.type === 'draw') {
+          applyRemoteDraw(msg);
+        } else if (msg.type === 'rotate') {
+          if (remote?.role === 'target' && msg.itemId === currentItem?.id) setRotation(msg.r);
+        } else if (msg.type === 'masks') {
+          setMasks(msg);
+        } else if (msg.type === 'maskState') {
+          if (!maskBar.hidden) applyMaskState(msg);
+        } else if (msg.type === 'remotePlaylist') {
+          remotePlaylist = msg;
+          renderList();
+        } else if (msg.type === 'remoteSound') {
+          remoteSoundState = msg;
+          updateSoundBar();
+        } else if (msg.type === 'due') {
+          noteServerTime(msg.serverTime);
+          due = msg.dueAt ? { dueAt: msg.dueAt, duration: msg.duration } : null;
+        } else if (msg.type === 'menu') {
+          setMenuEnabled(msg.enabled);
+          setTouchZoom(msg.touchZoom);
+        } else if (msg.type === 'auth') {
+          // Screen-PIN wurde gesetzt: dieser bereits verbundene Screen bleibt angemeldet
+          document.cookie = `${msg.cookie}=${encodeURIComponent(msg.token)}; max-age=${msg.maxAge}; path=/; samesite=lax`;
+        } else if (msg.type === 'sync') {
+          noteServerTime(msg.serverTime);
+          syncInfo = msg.sync ?? null;
+          applySync();
         } else if (msg.type === 'mode') {
           mode = msg.mode;
+          if (mode !== 'pause') zoomHeld = false; // Verwaltung hat fortgesetzt bzw. umgeschaltet: nicht erneut fortsetzen
+          if (mode === 'image' || mode === 'dark') resetZoom();
+          modeBy = msg.modeBy ?? null;
+          if (!menu.hidden) updateMenu();
           standby = msg.standby;
           standbyStyle = msg.standbyStyle;
           applyMode();
@@ -448,7 +1207,8 @@
           if (msg.version !== PAGE_VERSION && !PAGE_VERSION.startsWith('{{')) location.reload();
         } else if (msg.type === 'audio') {
           audio = { enabled: msg.enabled, volume: msg.volume };
-          restartVisibleVideo();
+          applyVideoAudio();
+          if (!menu.hidden) updateSoundMenu();
         } else if (msg.type === 'replay') {
           const v = visibleVideo();
           if (v) { v.currentTime = 0; restartVisibleVideo(); }
@@ -458,21 +1218,1753 @@
         else if (msg.type === 'reload') location.reload();
         else if (msg.type === 'removed') { screenName = 'Entfernt'; show(null, true); }
       };
-      ws.onclose = () => {
+      ws.onclose = (e) => {
+        if (e.code === 4001) return location.reload(); // PIN erforderlich: Seite leitet zur Anmeldung weiter
         statusDot.classList.add('on');
+        if (!menu.hidden) updateMenu();
         setTimeout(connect, 2000);
       };
     }
 
-    // Tippen/Klicken: Vollbild (nur nach Nutzeraktion erlaubt), Ton freischalten, blockiertes Video starten
+    // -----------------------------------------------------------------------
+    // Menü: Antippen zeigt Name/ID und Buttons (Vollbild an/aus, Anhalten, Herunterladen, Neu laden).
+    // ✕, erneutes Antippen oder Esc blendet es sofort aus, sonst nach 10 s von selbst.
+    // In der Verwaltung abschaltbar – dann schaltet Antippen wie früher direkt in den Vollbildmodus.
+    // -----------------------------------------------------------------------
+
     const hint = document.getElementById('hint');
+    const menu = document.getElementById('menu');
+    let menuEnabled = true;
+    let menuTimer = null;
+    let currentTitle = '';
+    let currentItem = null;
+    let quality = null; // { value, effective, defaultLabel, options } vom Server
+
+    /** Dateiname für den Download: Titel + Endung der Datei */
+    function downloadName(item) {
+      const ext = (decodeURIComponent((item.originalSrc ?? item.src).split('?')[0]).match(/\.[a-z0-9]{2,5}$/i) ?? [''])[0];
+      return (item.title || 'download').replace(/[\\/:*?"<>|]+/g, '_').trim() + ext;
+    }
     setTimeout(() => (hint.style.opacity = 0), 6000);
-    document.addEventListener('click', () => {
-      hint.style.opacity = 0;
+
+    const isFullscreen = () => !!(document.fullscreenElement || document.webkitFullscreenElement);
+    function toggleFullscreen() {
       const el = document.documentElement;
-      if (!document.fullscreenElement) (el.requestFullscreen || el.webkitRequestFullscreen)?.call(el)?.catch?.(() => {});
-      restartVisibleVideo();
+      if (isFullscreen()) (document.exitFullscreen || document.webkitExitFullscreen)?.call(document)?.catch?.(() => {});
+      else (el.requestFullscreen || el.webkitRequestFullscreen)?.call(el)?.catch?.(() => {});
+    }
+
+    function updateMenu() {
+      menu.querySelector('.m-name').textContent = screenName || 'Screen';
+      menu.querySelector('.m-id').textContent = screenId;
+      const conn = menu.querySelector('.m-conn');
+      const online = ws?.readyState === WebSocket.OPEN;
+      conn.textContent = online ? 'Verbunden' : 'Keine Verbindung';
+      conn.className = 'm-conn ' + (online ? 'ok' : 'err');
+      menu.querySelector('.m-title').textContent = currentTitle || 'Kein Inhalt';
+      updateMenuProgress();
+      menu.classList.toggle('is-fs', isFullscreen());
+      const qs = menu.querySelector('[data-m=quality]');
+      if (quality && document.activeElement !== qs) {
+        // „Standard (…)“ = Vorgabe vom Server; die übrigen Stufen gelten nur für diesen Screen
+        qs.innerHTML = [{ id: '', label: `Standard (${quality.defaultLabel})` }, ...quality.options]
+          .map((o) => `<option value="${o.id}">${o.label}</option>`)
+          .join('');
+        qs.value = quality.value;
+      }
+      const dl = menu.querySelector('[data-m=download]');
+      const downloadable = currentItem && (currentItem.type === 'image' || currentItem.type === 'video');
+      dl.hidden = !downloadable;
+      if (downloadable) {
+        dl.href = currentItem.originalSrc ?? currentItem.src; // Download immer in Originalqualität
+        dl.download = downloadName(currentItem);
+      }
+      // Fernsteuerung nur, wenn in der Verwaltung freigeschaltet (eine laufende lässt sich immer beenden)
+      menu.querySelector('[data-m=remote]').hidden = !remoteAllowed && remote?.role !== 'controller';
+      if (!remoteAllowed && remote?.role !== 'target') remoteBox.hidden = true;
+      updateSoundMenu();
+      updateRemoteBox();
+      const pausedHere = mode === 'pause' && modeBy === 'screen';
+      menu.classList.toggle('is-paused', pausedHere);
+      menu.classList.toggle('can-pause', mode === 'play' || pausedHere);
+    }
+
+    // Ton im Menü: Video-Ton (wie der Ton-Schalter in der Verwaltung) und Musik (nur wenn sie hier spielt)
+    function updateSoundMenu() {
+      setVolumeRow('video', !audio.enabled, audio.volume, true);
+      setVolumeRow('music', !!musicState?.muted, musicState?.screenVolume ?? 100, !!musicState?.enabled);
+    }
+    function setVolumeRow(kind, muted, volume, visible) {
+      const row = menu.querySelector(`.m-vol[data-kind=${kind}]`);
+      row.hidden = !visible;
+      row.classList.toggle('muted', muted);
+      const input = row.querySelector('input');
+      if (document.activeElement !== input) input.value = volume;
+      row.querySelector('.m-vol-val').textContent = input.value + ' %';
+      row.querySelector('.m-mute').title = muted ? 'Ton einschalten' : 'Stumm schalten';
+    }
+    // Änderungen sofort anwenden und dem Server melden (die Verwaltung zeigt sie an)
+    function setVideoAudio(patch) {
+      audio = { ...audio, ...patch };
+      applyVideoAudio();
+      send({ type: 'audio', ...patch });
+      updateSoundMenu();
+    }
+    function setMusicVolume(patch) {
+      if (!musicState) return;
+      musicState = { ...musicState, ...(patch.volume !== undefined && { screenVolume: patch.volume }), ...(patch.muted !== undefined && { muted: patch.muted }) };
+      applyMusicVolume();
+      send({ type: 'musicVolume', ...patch });
+      updateSoundMenu();
+    }
+
+    // Spielzeit wie in der Verwaltung: Video, Text mit Dauer oder Restzeit der Auto-Zeit
+    let due = null; // { dueAt, duration } in Serverzeit (ms)
+    function playtime() {
+      const v = visibleVideo();
+      if (v && isFinite(v.duration) && v.duration > 0) return { t: v.currentTime, d: v.duration };
+      if (textTimer) return { t: Math.max(0, textTimer.elapsed), d: textTimer.duration };
+      if (due?.dueAt && mode === 'play') {
+        const d = due.duration / 1000;
+        return { t: Math.max(0, Math.min(d, d - (due.dueAt - serverNow()) / 1000)), d };
+      }
+      return null;
+    }
+    const fmtTime = (sec) => {
+      sec = Math.max(0, Math.floor(sec));
+      const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = String(sec % 60).padStart(2, '0');
+      return h ? `${h}:${String(m).padStart(2, '0')}:${s}` : `${m}:${s}`;
+    };
+    function updateMenuProgress() {
+      const p = playtime();
+      const box = menu.querySelector('.m-progress');
+      box.hidden = !p;
+      if (!p) return;
+      menu.querySelector('.m-time').textContent = `${fmtTime(p.t)} / ${fmtTime(p.d)}`;
+      menu.querySelector('.m-bar > div').style.width = `${Math.min(100, (p.t / p.d) * 100)}%`;
+    }
+    setInterval(() => !menu.hidden && updateMenuProgress(), 250);
+
+    function showMenu() {
+      updateMenu();
+      menu.hidden = false;
+      document.body.classList.add('menu-open');
+      clearTimeout(menuTimer);
+      menuTimer = setTimeout(hideMenu, 10000);
+    }
+    function hideMenu() {
+      clearTimeout(menuTimer);
+      menu.querySelector('.m-qr').hidden = true;
+      menu.hidden = true;
+      document.body.classList.remove('menu-open');
+    }
+
+    menu.addEventListener('input', (e) => {
+      const volume = Number(e.target.value);
+      if (e.target.dataset.m === 'vol-video') setVideoAudio({ enabled: volume > 0, volume });
+      else if (e.target.dataset.m === 'vol-music') setMusicVolume({ volume, muted: volume === 0 });
+      else return;
+      clearTimeout(menuTimer); // Anzeige verlängern
+      menuTimer = setTimeout(hideMenu, 10000);
     });
+
+    menu.addEventListener('change', (e) => {
+      if (e.target.dataset.m !== 'quality') return;
+      send({ type: 'quality', value: e.target.value });
+      showMenu(); // Anzeige verlängern
+    });
+
+    menu.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (!e.target.closest('.m-panel')) return hideMenu(); // Klick neben die Karte schließt
+      const action = e.target.closest('button')?.dataset.m;
+      if (action === 'fullscreen') toggleFullscreen();
+      if (action === 'reload') return location.reload();
+      if (action === 'pause') send({ type: 'mode', mode: mode === 'pause' ? 'play' : 'pause' });
+      if (action === 'qr') {
+        const box = menu.querySelector('.m-qr');
+        box.hidden = !box.hidden;
+        if (!box.hidden) {
+          box.querySelector('img').src = '/qr.svg?for=screen&t=' + Date.now();
+          fetch('/connect.json').then((r) => r.json()).then((u) => (box.querySelector('.m-qr-url').textContent = u.screen)).catch(() => {});
+          clearTimeout(menuTimer);
+          menuTimer = setTimeout(hideMenu, 60000); // Zeit zum Scannen
+          return;
+        }
+      }
+      if (action === 'remote') {
+        remoteBox.hidden = !remoteBox.hidden;
+        if (!remoteBox.hidden) {
+          send({ type: 'remoteList' });
+          updateRemoteBox();
+        }
+      }
+      if (action === 'remote-pick') {
+        const x = remoteChoice?.find((c) => c.id === e.target.closest('button').dataset.id);
+        if (x) x.on = !x.on;
+        updateRemoteBox();
+      }
+      if (action === 'remote-start') {
+        send({ type: 'remote', action: 'start', targets: (remoteChoice ?? []).filter((x) => x.on).map((x) => x.id) });
+        remoteBox.hidden = true;
+        return hideMenu();
+      }
+      if (action === 'remote-stop') {
+        send({ type: 'remote', action: 'stop' });
+        remoteBox.hidden = true;
+      }
+      // Einschalten bei Lautstärke 0: auf die Hälfte stellen, sonst bliebe es still
+      if (action === 'mute-video') setVideoAudio(audio.enabled ? { enabled: false } : { enabled: true, ...(audio.volume === 0 && { volume: 50 }) });
+      if (action === 'mute-music') {
+        setMusicVolume(!musicState?.muted ? { muted: true } : { muted: false, ...(musicState.screenVolume === 0 && { volume: 50 }) });
+      }
+      if (action === 'mute-video' || action === 'mute-music') {
+        if (musicState?.enabled && musicState.playing && musicPlayer.paused) applyMusic(); // Tippen schaltet blockierten Ton frei
+      }
+      if (action === 'close') return hideMenu(); // Vollbild/Anhalten: Menü bleibt offen und zeigt den neuen Zustand
+      showMenu(); // Bedienung verlängert die Anzeige
+    });
+    document.addEventListener('fullscreenchange', () => !menu.hidden && updateMenu());
+    document.addEventListener('keydown', (e) => e.key === 'Escape' && hideMenu());
+
+    // -----------------------------------------------------------------------
+    // Zoom per Fingergeste (in der Verwaltung abschaltbar): zwei Finger vergrößern,
+    // ein Finger verschiebt, Doppeltippen vergrößert bzw. setzt zurück.
+    // Bilder/Texte: solange vergrößert ist, hält der Screen an (Verwaltung sieht „⏸ Client“).
+    // Nach 60 s ohne Berührung oder beim nächsten Inhalt wird zurückgesetzt.
+    // -----------------------------------------------------------------------
+
+    let touchZoom = true;
+    const ZOOM_MAX = 5;
+    const zoom = { s: 1, x: 0, y: 0 };
+    const touches = new Map(); // pointerId -> { x, y }
+    let gesture = null; // Ausgangslage der laufenden Geste
+    let gestureMoved = false; // war eine Geste, kein Antippen (kein Menü)
+    let zoomHeld = false; // wegen des Zooms am Screen angehalten
+    let zoomIdle = null;
+
+    const zoomable = () =>
+      touchZoom && currentItem && currentItem.type !== 'url' && (mode === 'play' || mode === 'pause');
+    const zoomed = () => zoom.s > 1.001;
+
+    function applyZoom(animate = false) {
+      zoom.s = Math.min(ZOOM_MAX, Math.max(1, zoom.s));
+      // Inhalt bleibt bildschirmfüllend: nicht über den Rand hinaus verschieben
+      zoom.x = Math.min(0, Math.max(innerWidth * (1 - zoom.s), zoom.x));
+      zoom.y = Math.min(0, Math.max(innerHeight * (1 - zoom.s), zoom.y));
+      const el = layers[front];
+      el.style.transition = animate ? 'opacity .8s ease, transform .25s ease' : '';
+      el.style.transformOrigin = '0 0';
+      el.style.transform = zoomed() ? `translate(${zoom.x}px, ${zoom.y}px) scale(${zoom.s})` : '';
+      holdForZoom(zoomed());
+      clearTimeout(zoomIdle);
+      if (zoomed() && remote?.role !== 'target') zoomIdle = setTimeout(() => resetZoom(true), 60000);
+      if (remote?.role === 'controller') sendRemoteZoom();
+      remoteBar.querySelector('[data-r=unzoom]').hidden = !zoomed();
+    }
+
+    function resetZoom(animate = false) {
+      Object.assign(zoom, { s: 1, x: 0, y: 0 });
+      applyZoom(animate);
+    }
+
+    // Bilder und Texte während des Zooms anhalten, danach wieder fortsetzen (Videos laufen weiter)
+    function holdForZoom(on) {
+      if (remote) return; // in der Fernsteuerung bleibt der Inhalt ohnehin stehen
+      if (on && !zoomHeld && mode === 'play' && currentItem?.type !== 'video') {
+        zoomHeld = true;
+        send({ type: 'mode', mode: 'pause' });
+      } else if (!on && zoomHeld) {
+        zoomHeld = false;
+        if (mode === 'pause' && modeBy === 'screen') send({ type: 'mode', mode: 'play' });
+      }
+    }
+
+    function toggleZoomAt(x, y) {
+      if (zoomed()) return resetZoom(true);
+      const s = 2.5;
+      Object.assign(zoom, { s, x: x - x * s, y: y - y * s }); // Punkt unter dem Finger bleibt stehen
+      applyZoom(true);
+    }
+
+    const center = (a, b) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
+    function startGesture() {
+      const pts = [...touches.values()];
+      gesture = {
+        s: zoom.s, x: zoom.x, y: zoom.y, n: pts.length,
+        mid: pts.length > 1 ? center(pts[0], pts[1]) : pts[0],
+        dist: pts.length > 1 ? Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y) : 0,
+      };
+    }
+
+    document.addEventListener('pointerdown', (e) => {
+      if (penOn || e.pointerType === 'mouse' || e.target.closest('#menu, #remoteBar, #penBar, #soundBar, #listBar, #lbAsk, #maskBar') || !(zoomable() || remote?.role === 'controller')) return;
+      if (!touches.size) gestureMoved = false;
+      touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      startGesture();
+    });
+    document.addEventListener('pointermove', (e) => {
+      if (!touches.has(e.pointerId)) return;
+      touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      const pts = [...touches.values()];
+      if (pts.length !== gesture.n) startGesture();
+      if (pts.length >= 2) {
+        // Zwei Finger: der Punkt zwischen den Fingern bleibt unter den Fingern
+        const mid = center(pts[0], pts[1]);
+        const s = Math.min(ZOOM_MAX, Math.max(1, (gesture.s * Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y)) / (gesture.dist || 1)));
+        const px = (gesture.mid.x - gesture.x) / gesture.s;
+        const py = (gesture.mid.y - gesture.y) / gesture.s;
+        Object.assign(zoom, { s, x: mid.x - px * s, y: mid.y - py * s });
+        gestureMoved = true;
+        applyZoom();
+      } else if (zoomed()) {
+        // Ein Finger: vergrößerten Inhalt verschieben
+        const dx = pts[0].x - gesture.mid.x;
+        const dy = pts[0].y - gesture.mid.y;
+        if (!gestureMoved && Math.hypot(dx, dy) < 10) return; // kleines Zittern beim Antippen
+        Object.assign(zoom, { x: gesture.x + dx, y: gesture.y + dy });
+        gestureMoved = true;
+        applyZoom();
+      }
+    });
+    const endTouch = (e) => {
+      if (!touches.delete(e.pointerId)) return;
+      // Fernsteuerung: waagerecht wischen (nicht vergrößert) = vor/zurück
+      if (!touches.size && gesture?.n === 1 && remote?.role === 'controller' && !zoomed()) {
+        const dx = e.clientX - gesture.mid.x;
+        const dy = e.clientY - gesture.mid.y;
+        if (Math.abs(dx) > 60 && Math.abs(dx) > 1.5 * Math.abs(dy)) {
+          gestureMoved = true;
+          remoteStep(dx < 0 ? 'next' : 'prev');
+        }
+      }
+      if (touches.size) startGesture();
+      else if (zoom.s < 1.05) resetZoom(true); // fast ganz heraus gezoomt: zurück auf normal
+    };
+    document.addEventListener('pointerup', endTouch);
+    document.addEventListener('pointercancel', endTouch);
+    addEventListener('resize', () => zoomed() && applyZoom());
+
+    function setTouchZoom(on) {
+      touchZoom = on !== false;
+      document.body.classList.toggle('touch-zoom', touchZoom);
+      if (!touchZoom && zoomed()) resetZoom();
+    }
+
+    // -----------------------------------------------------------------------
+    // Fernsteuerung: Dieses Gerät steuert andere Screens (Auswahl im Menü). Die Gruppe zeigt
+    // denselben Eintrag; Weiterschalten (Leiste, Wischen, Pfeiltasten) und Zoom gelten für alle.
+    // Der Zoom wird bezogen auf das Bild übertragen, damit er auch bei anderem Seitenverhältnis passt.
+    // -----------------------------------------------------------------------
+
+    let remote = null; // { role: 'controller', targets: [Namen] } | { role: 'target', by } | null
+    let remoteAllowed = false; // in der Verwaltung freigeschaltet: darf andere Screens steuern
+    let rot = 0; // Drehung des aktuellen Inhalts in Vierteldrehungen (im Uhrzeigersinn)
+    const remoteBar = document.getElementById('remoteBar');
+    const remoteBox = menu.querySelector('.m-remote');
+    let remoteChoice = null; // Auswahl im Menü: Liste der Screens vom Server
+
+    function setRemote(r) {
+      remote = r ?? null;
+      const ctrl = remote?.role === 'controller';
+      remoteBar.hidden = !ctrl;
+      document.body.classList.toggle('remote-ctrl', ctrl);
+      if (!ctrl) {
+        setPen(false);
+        setSoundBar(false);
+        setListBar(false);
+        if (!maskBar.hidden) setMaskBar(false);
+      }
+      if (!remote && strokes.length) clearInk();
+      if (!remote && rot) setRotation(0);
+      if (ctrl) remoteBar.querySelector('.rb-targets').textContent = remote.targets.length ? '→ ' + remote.targets.join(', ') : t('keine Screens gewählt');
+      if (ctrl && params.has('pair')) {
+        // Kopplung ist erledigt: Schlüssel aus der Adresse nehmen (Neuladen startet nicht erneut)
+        params.delete('pair');
+        history.replaceState(null, '', location.pathname + (params.size ? '?' + params : ''));
+      }
+      noteBarHeight();
+      if (!menu.hidden) updateRemoteBox();
+    }
+    // Höhe der Leiste für die Felder darüber (am Smartphone zwei Zeilen)
+    function noteBarHeight() {
+      requestAnimationFrame(() => remoteBar.offsetHeight && document.documentElement.style.setProperty('--rb-h', remoteBar.offsetHeight + 'px'));
+    }
+    addEventListener('resize', noteBarHeight);
+
+    const remoteStep = (dir) => send({ type: 'remote', action: dir });
+
+    // Bildbereich des Inhalts (Bilder/Videos werden eingepasst, alles andere füllt den Screen).
+    // Gedreht zählt der sichtbare (gedrehte) Bereich – alle Screens der Gruppe sind gleich gedreht.
+    function contentRect() {
+      const el = layers[front].firstElementChild;
+      let nw = el?.naturalWidth || el?.videoWidth;
+      let nh = el?.naturalHeight || el?.videoHeight;
+      if (!nw || !nh) return { left: 0, top: 0, w: innerWidth, h: innerHeight };
+      if (rot % 2) [nw, nh] = [nh, nw];
+      const f = Math.min(innerWidth / nw, innerHeight / nh);
+      return { left: (innerWidth - nw * f) / 2, top: (innerHeight - nh * f) / 2, w: nw * f, h: nh * f };
+    }
+
+    // Steuerndes Gerät: Bildmitte als Punkt im Bild (0–1) und Vergrößerung senden, höchstens einmal pro Bild
+    let zoomSendPending = false;
+    function sendRemoteZoom() {
+      if (zoomSendPending) return;
+      zoomSendPending = true;
+      requestAnimationFrame(() => {
+        zoomSendPending = false;
+        const r = contentRect();
+        const cx = (innerWidth / 2 - zoom.x) / zoom.s;
+        const cy = (innerHeight / 2 - zoom.y) / zoom.s;
+        send({ type: 'remoteZoom', itemId: currentItem?.id, s: zoom.s, u: (cx - r.left) / r.w, v: (cy - r.top) / r.h });
+      });
+    }
+
+    // Gesteuerter Screen: denselben Bildpunkt in die Mitte holen
+    function applyRemoteZoom(m) {
+      if (remote?.role !== 'target' || m.itemId !== currentItem?.id) return;
+      const r = contentRect();
+      const lx = r.left + m.u * r.w;
+      const ly = r.top + m.v * r.h;
+      Object.assign(zoom, { s: m.s, x: innerWidth / 2 - lx * m.s, y: innerHeight / 2 - ly * m.s });
+      applyZoom(true);
+    }
+
+    // Auswahl im Menü
+    function updateRemoteBox() {
+      const ctrl = remote?.role === 'controller';
+      const note = remoteBox.querySelector('.m-remote-note');
+      if (remote?.role === 'target') {
+        remoteBox.hidden = false;
+        remoteBox.querySelector('.m-chips').replaceChildren();
+        note.textContent = t('Wird ferngesteuert von „{0}“.', remote.by);
+        remoteBox.querySelector('[data-m=remote-start]').hidden = true;
+        remoteBox.querySelector('[data-m=remote-stop]').hidden = false;
+        return;
+      }
+      remoteBox.querySelector('[data-m=remote-start]').hidden = false;
+      remoteBox.querySelector('[data-m=remote-stop]').hidden = !ctrl;
+      remoteBox.querySelector('[data-m=remote-start]').textContent = ctrl ? t('Übernehmen') : t('Starten');
+      if (!remoteChoice) return;
+      const chips = remoteBox.querySelector('.m-chips');
+      chips.replaceChildren(
+        ...remoteChoice.map((x) => {
+          const b = document.createElement('button');
+          b.className = 'm-chip' + (x.on ? ' on' : '') + (x.online ? '' : ' off');
+          b.dataset.m = 'remote-pick';
+          b.dataset.id = x.id;
+          b.translate = false;
+          b.textContent = (x.on ? '✓ ' : '') + x.name;
+          return b;
+        })
+      );
+      note.textContent = remoteChoice.length ? t('Weiterschalten per Pfeil oder Wischen, Zoom wird übertragen.') : t('Keine anderen Screens vorhanden.');
+      remoteBox.querySelector('[data-m=remote-start]').disabled = !remoteChoice.some((x) => x.on);
+    }
+
+    // -----------------------------------------------------------------------
+    // Stift (nur am steuernden Gerät): zeichnet auf das Bild, die Striche erscheinen live auf den
+    // gesteuerten Screens. Punkte werden bezogen auf das Bild (0–1) gespeichert, die Striche liegen
+    // in der Bildebene und zoomen mit. Beim nächsten Inhalt sind sie weg.
+    // -----------------------------------------------------------------------
+
+    const SVG_NS = 'http://www.w3.org/2000/svg';
+    const PEN_COLORS = ['#ef4444', '#facc15', '#22c55e', '#3b82f6', '#ffffff'];
+    const PEN_SIZES = [6, 12, 24]; // Promille der kürzeren Bildseite
+    const penBar = document.getElementById('penBar');
+    let penOn = false;
+    let pen = { color: PEN_COLORS[0], size: PEN_SIZES[1] };
+    try { pen = { ...pen, ...JSON.parse(storage.get('screendeck-pen') || '{}') }; } catch {}
+    let strokes = []; // Striche zum aktuellen Inhalt: { id, color, size, pts: [u, v, u, v, …] }
+    let drawing = null; // Strich, der gerade gezeichnet wird
+
+    penBar.innerHTML =
+      PEN_COLORS.map((c) => `<button class="pen-color" data-color="${c}" style="--c:${c}" title="Farbe"><i></i></button>`).join('') +
+      '<span class="pen-sep"></span>' +
+      PEN_SIZES.map((n, i) => `<button class="pen-size" data-size="${n}" title="${['dünn', 'mittel', 'dick'][i]}"><i style="width:${6 + i * 5}px;height:${6 + i * 5}px"></i></button>`).join('') +
+      '<span class="pen-sep"></span>' +
+      '<button class="pen-undo" data-p="clear" title="Zeichnung löschen"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v6M14 11v6"/></svg></button>' +
+      '<button class="pen-undo" data-p="undo" title="Letzten Strich zurücknehmen"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/></svg></button>';
+
+    function updatePenBar() {
+      penBar.hidden = !penOn;
+      document.body.classList.toggle('pen-on', penOn);
+      remoteBar.querySelector('[data-r=pen]').classList.toggle('on', penOn);
+      for (const b of penBar.querySelectorAll('.pen-color')) b.classList.toggle('on', b.dataset.color === pen.color);
+      for (const b of penBar.querySelectorAll('.pen-size')) b.classList.toggle('on', Number(b.dataset.size) === pen.size);
+      for (const b of penBar.querySelectorAll('.pen-undo')) b.disabled = !strokes.length;
+    }
+    function setPen(on) {
+      penOn = on && remote?.role === 'controller';
+      updatePenBar();
+    }
+
+    // Striche als SVG in der Bildebene (über dem Inhalt der vorderen Ebene)
+    let inkFrame = 0;
+    function renderInk() {
+      inkFrame = 0;
+      const layer = layers[front];
+      let ink = layer.querySelector(':scope > svg.ink');
+      if (!strokes.length) return ink?.remove();
+      if (!ink) {
+        ink = document.createElementNS(SVG_NS, 'svg');
+        ink.setAttribute('class', 'ink');
+        layer.appendChild(ink);
+      }
+      const r = contentRect();
+      const unit = Math.min(r.w, r.h) / 1000;
+      ink.setAttribute('viewBox', `0 0 ${innerWidth} ${innerHeight}`);
+      ink.replaceChildren(
+        ...strokes.map((st) => {
+          const line = document.createElementNS(SVG_NS, 'polyline');
+          let pts = '';
+          for (let i = 0; i < st.pts.length; i += 2) pts += `${(r.left + st.pts[i] * r.w).toFixed(1)},${(r.top + st.pts[i + 1] * r.h).toFixed(1)} `;
+          line.setAttribute('points', pts);
+          line.setAttribute('fill', 'none');
+          line.setAttribute('stroke', st.color);
+          line.setAttribute('stroke-width', (st.size * unit).toFixed(2));
+          line.setAttribute('stroke-linecap', 'round');
+          line.setAttribute('stroke-linejoin', 'round');
+          return line;
+        })
+      );
+    }
+    const scheduleInk = () => (inkFrame ||= requestAnimationFrame(renderInk));
+    function clearInk() {
+      strokes = [];
+      drawing = null;
+      for (const l of layers) l.querySelector(':scope > svg.ink')?.remove();
+      updatePenBar();
+    }
+    addEventListener('resize', () => strokes.length && scheduleInk());
+
+    // Bildschirmpunkt → Punkt im Bild (0–1), auch bei Zoom
+    function toImage(cx, cy) {
+      const r = contentRect();
+      const lx = (cx - zoom.x) / zoom.s;
+      const ly = (cy - zoom.y) / zoom.s;
+      return [Math.round(((lx - r.left) / r.w) * 10000) / 10000, Math.round(((ly - r.top) / r.h) * 10000) / 10000];
+    }
+
+    // Neue Punkte höchstens einmal pro Bild senden
+    let drawSendFrame = 0;
+    function flushDraw() {
+      drawSendFrame = 0;
+      if (!drawing || drawing.sent >= drawing.pts.length) return;
+      send({ type: 'remoteDraw', op: 'append', id: drawing.id, itemId: currentItem?.id, pts: drawing.pts.slice(drawing.sent) });
+      drawing.sent = drawing.pts.length;
+    }
+
+    document.addEventListener('pointerdown', (e) => {
+      if (!penOn || drawing || e.target.closest('#menu, #remoteBar, #penBar, #soundBar, #listBar, #lbAsk, #maskBar')) return;
+      e.preventDefault();
+      const p = toImage(e.clientX, e.clientY);
+      drawing = { id: Math.random().toString(36).slice(2, 10), color: pen.color, size: pen.size, pts: [...p, ...p], pointer: e.pointerId, sent: 0 };
+      strokes.push(drawing);
+      send({ type: 'remoteDraw', op: 'start', id: drawing.id, itemId: currentItem?.id, color: drawing.color, size: drawing.size, pts: drawing.pts });
+      drawing.sent = drawing.pts.length;
+      updatePenBar();
+      scheduleInk();
+    });
+    document.addEventListener('pointermove', (e) => {
+      if (!drawing || e.pointerId !== drawing.pointer) return;
+      for (const ev of e.getCoalescedEvents?.() ?? [e]) drawing.pts.push(...toImage(ev.clientX, ev.clientY));
+      scheduleInk();
+      drawSendFrame ||= requestAnimationFrame(flushDraw);
+    });
+    const endStroke = (e) => {
+      if (!drawing || e.pointerId !== drawing.pointer) return;
+      flushDraw();
+      drawing = null;
+    };
+    document.addEventListener('pointerup', endStroke);
+    document.addEventListener('pointercancel', endStroke);
+
+    function undoStroke() {
+      const last = strokes.pop();
+      if (!last) return;
+      if (last === drawing) drawing = null;
+      send({ type: 'remoteDraw', op: 'undo', id: last.id, itemId: currentItem?.id });
+      updatePenBar();
+      scheduleInk();
+    }
+
+    // Gesteuerter Screen: Striche vom steuernden Gerät übernehmen
+    function applyRemoteDraw(m) {
+      if (remote?.role !== 'target') return;
+      if (m.op === 'start') {
+        if (m.itemId !== currentItem?.id) return;
+        strokes.push({ id: m.id, color: m.color, size: m.size, pts: m.pts });
+      } else if (m.op === 'append') strokes.find((st) => st.id === m.id)?.pts.push(...m.pts);
+      else if (m.op === 'undo') strokes = strokes.filter((st) => st.id !== m.id);
+      else if (m.op === 'clear') strokes = [];
+      scheduleInk();
+    }
+
+    penBar.addEventListener('click', (e) => {
+      e.stopPropagation(); // kein Menü
+      const b = e.target.closest('button');
+      if (!b) return;
+      if (b.dataset.color) pen.color = b.dataset.color;
+      if (b.dataset.size) pen.size = Number(b.dataset.size);
+      if (b.dataset.p === 'undo') undoStroke();
+      if (b.dataset.p === 'clear' && strokes.length) {
+        // ganze Zeichnung zurücksetzen, auch auf den gesteuerten Screens
+        send({ type: 'remoteDraw', op: 'clear', itemId: currentItem?.id });
+        clearInk();
+      }
+      storage.set('screendeck-pen', JSON.stringify({ color: pen.color, size: pen.size }));
+      updatePenBar();
+    });
+    penBar.addEventListener('pointerdown', (e) => e.stopPropagation());
+
+    // -----------------------------------------------------------------------
+    // Drehung (Fernsteuerung): Bild/Video in Vierteldrehungen, auf allen Screens der Gruppe gleich.
+    // Striche drehen mit, der Zoom beginnt neu. Beim nächsten Inhalt ist die Drehung weg.
+    // -----------------------------------------------------------------------
+
+    const rotatable = () => currentItem?.type === 'image' || currentItem?.type === 'video';
+
+    function applyRotation() {
+      const el = layers[front].firstElementChild;
+      if (!el || !(el.tagName === 'IMG' || el.tagName === 'VIDEO')) return;
+      // gedreht um 90°/270°: Element mit vertauschten Seiten, damit das Bild nach dem Drehen eingepasst ist
+      const odd = rot % 2;
+      el.classList.toggle('rotated', rot > 0);
+      el.style.width = odd ? innerHeight + 'px' : '';
+      el.style.height = odd ? innerWidth + 'px' : '';
+      el.style.transform = rot ? `rotate(${rot * 90}deg)` : '';
+    }
+
+    function setRotation(r) {
+      r = ((r % 4) + 4) % 4;
+      // Striche mitdrehen: Punkt im Bild (u, v) → (1 − v, u) je Vierteldrehung
+      for (let n = (r - rot + 4) % 4; n > 0; n--)
+        for (const st of strokes) for (let i = 0; i < st.pts.length; i += 2) [st.pts[i], st.pts[i + 1]] = [1 - st.pts[i + 1], st.pts[i]];
+      rot = r;
+      applyRotation();
+      resetZoom();
+      if (strokes.length) scheduleInk();
+      remoteBar.querySelector('[data-r=rotate]').classList.toggle('on', rot > 0);
+    }
+    addEventListener('resize', () => rot % 2 && applyRotation());
+
+    // -----------------------------------------------------------------------
+    // Ton (nur am steuernden Gerät): Musik und Video-Ton der gesteuerten Screens, Musiktitel wählen.
+    // Gesteuert wird ein wählbarer Screen (vorgewählt: der erste gesteuerte). Titel und das Verhalten
+    // bei Videos mit Ton gelten für die Musik aller Screens.
+    // -----------------------------------------------------------------------
+
+    const soundBar = document.getElementById('soundBar');
+    let remoteSoundState = null; // vom Server: { screenId, screens, music: { muted, volume, playing, title, tracks, behavior, duckLevel }, video: { enabled, volume } }
+    let soundDragging = false;
+
+    function setSoundBar(on) {
+      soundBar.hidden = !(on && remote?.role === 'controller');
+      remoteBar.querySelector('[data-r=sound]').classList.toggle('on', !soundBar.hidden);
+      if (!soundBar.hidden) {
+        setPen(false);
+        updateSoundBar();
+        send({ type: 'remoteSound' }); // aktuellen Stand und Screen-Liste holen
+      }
+    }
+
+    function updateSoundBar() {
+      const s = remoteSoundState;
+      if (soundBar.hidden || !s) return;
+      soundBar.querySelector('.sb-screens').replaceChildren(
+        ...(s.screens ?? []).map((x) => {
+          const b = document.createElement('button');
+          b.className = 'm-chip' + (x.id === s.screenId ? ' on' : '') + (x.online ? '' : ' off');
+          b.dataset.s = 'screen';
+          b.dataset.id = x.id;
+          b.translate = false;
+          b.textContent = (x.id === s.screenId ? '✓ ' : '') + x.name;
+          return b;
+        })
+      );
+      for (const el of soundBar.querySelectorAll('.m-vol[data-kind=music], .m-vol[data-kind=video]')) el.classList.toggle('sb-disabled', !s.screenId);
+      const row = (kind, muted, vol) => {
+        const r = soundBar.querySelector(`.m-vol[data-kind=${kind}]`);
+        r.classList.toggle('muted', muted);
+        if (!soundDragging) r.querySelector('input').value = vol;
+        r.querySelector('.m-vol-val').textContent = vol + '%';
+      };
+      row('music', s.music.muted, s.music.volume);
+      row('video', !s.video.enabled, s.video.volume);
+      // Musik bei Video mit Ton (für alle Screens): Verhalten, beim Leiserwerden mit Stufe
+      const beh = soundBar.querySelector('[data-s=behavior]');
+      if (document.activeElement !== beh) beh.value = s.music.behavior;
+      soundBar.querySelector('[data-kind=duck]').hidden = s.music.behavior !== 'duck';
+      row('duck', false, s.music.duckLevel);
+      soundBar.querySelector('.sb-track').hidden = !s.music.tracks;
+      soundBar.querySelector('.sb-play').style.display = s.music.playing ? 'none' : '';
+      soundBar.querySelector('.sb-pause').style.display = s.music.playing ? '' : 'none';
+      soundBar.querySelector('.sb-title').textContent = s.music.title || t('Kein Titel');
+    }
+
+    // Änderungen sammeln und höchstens alle 100 ms senden (Schieberegler)
+    let soundPending = null;
+    let soundTimer = 0;
+    function sendSound(p) {
+      soundPending = {
+        music: { ...soundPending?.music, ...p.music },
+        video: { ...soundPending?.video, ...p.video },
+        duck: { ...soundPending?.duck, ...p.duck },
+        track: p.track ?? soundPending?.track,
+      };
+      soundTimer ||= setTimeout(() => {
+        soundTimer = 0;
+        send({ type: 'remoteSound', ...soundPending });
+        soundPending = null;
+      }, 100);
+    }
+
+    soundBar.addEventListener('input', (e) => {
+      const s = remoteSoundState;
+      if (!s) return;
+      const v = Number(e.target.value);
+      if (e.target.dataset.s === 'vol-music') {
+        Object.assign(s.music, { volume: v, muted: v === 0 });
+        sendSound({ music: { volume: v, muted: v === 0 } });
+      } else if (e.target.dataset.s === 'vol-video') {
+        s.video.volume = v;
+        sendSound({ video: { volume: v } });
+      } else if (e.target.dataset.s === 'duck') {
+        s.music.duckLevel = v;
+        sendSound({ duck: { level: v } });
+      } else if (e.target.dataset.s === 'behavior') {
+        s.music.behavior = e.target.value;
+        sendSound({ duck: { behavior: e.target.value } });
+        e.target.blur();
+      }
+      updateSoundBar();
+    });
+    soundBar.addEventListener('click', (e) => {
+      e.stopPropagation(); // kein Menü
+      const action = e.target.closest('button')?.dataset.s;
+      const s = remoteSoundState;
+      if (!action || !s) return;
+      if (action === 'screen') {
+        // anderen Screen wählen: Offenes noch an den bisherigen senden, die neuen Werte kommen vom Server
+        if (soundTimer) {
+          clearTimeout(soundTimer);
+          soundTimer = 0;
+          send({ type: 'remoteSound', ...soundPending });
+          soundPending = null;
+        }
+        s.screenId = e.target.closest('button').dataset.id;
+        send({ type: 'remoteSound', screenId: s.screenId });
+      }
+      if (action === 'mute-music') {
+        // stumm → laut (bei 0 % mit halber Lautstärke), sonst stumm
+        const p = s.music.muted ? { muted: false, ...(s.music.volume === 0 && { volume: 50 }) } : { muted: true };
+        Object.assign(s.music, p);
+        sendSound({ music: p });
+      }
+      if (action === 'mute-video') {
+        s.video.enabled = !s.video.enabled;
+        sendSound({ video: { enabled: s.video.enabled } });
+      }
+      if (action === 'prev' || action === 'next') sendSound({ track: action });
+      if (action === 'play') {
+        sendSound({ track: s.music.playing ? 'pause' : 'play' });
+        s.music.playing = !s.music.playing;
+      }
+      updateSoundBar();
+    });
+    soundBar.addEventListener('pointerdown', (e) => {
+      e.stopPropagation();
+      if (e.target.matches('input')) soundDragging = true;
+    });
+    addEventListener('pointerup', () => (soundDragging = false));
+
+    // -----------------------------------------------------------------------
+    // Playlist (nur am steuernden Gerät): Vorschaubilder der aktiven Playlist, antippen zeigt den
+    // Eintrag auf allen gesteuerten Screens. Der Server schickt Änderungen von selbst nach.
+    // -----------------------------------------------------------------------
+
+    const listBar = document.getElementById('listBar');
+    let remotePlaylist = null; // vom Server: { name, items: [{ id, title, type, thumb, bg, color, text }] }
+
+    function setListBar(on) {
+      listBar.hidden = !(on && remote?.role === 'controller');
+      remoteBar.querySelector('[data-r=list]').classList.toggle('on', !listBar.hidden);
+      if (listBar.hidden) return setDelMode(false);
+      setPen(false);
+      setSoundBar(false);
+      renderList(true);
+      send({ type: 'remotePlaylist' });
+    }
+
+    const TYPE_MARK = { video: '▶', text: 'T', url: '🌐' };
+    function renderList(scroll = false) {
+      if (listBar.hidden || !remotePlaylist) return;
+      // Auswahl der Playlisten (die aktive läuft auf den Screens, Hochladen landet darin)
+      const sel = listBar.querySelector('.lb-select');
+      const opts = (remotePlaylist.playlists ?? [{ id: remotePlaylist.activeId, name: remotePlaylist.name, count: remotePlaylist.items.length }])
+        .map((p) => `${p.id}\t${p.name} (${p.count})`)
+        .join('\n');
+      if (sel.dataset.opts !== opts) {
+        sel.dataset.opts = opts;
+        sel.replaceChildren(
+          ...opts.split('\n').map((line) => {
+            const [id, label] = line.split('\t');
+            return Object.assign(document.createElement('option'), { value: id, textContent: label });
+          })
+        );
+      }
+      if (document.activeElement !== sel) sel.value = remotePlaylist.activeId;
+      const n = remotePlaylist.items.length;
+      listBar.querySelector('.lb-count').textContent = n === 1 ? t('1 Eintrag') : t('{0} Einträge', n);
+      const grid = listBar.querySelector('.lb-grid');
+      // nur neu aufbauen, wenn sich die Liste geändert hat (Bilder sollen nicht neu laden)
+      const sig = remotePlaylist.activeId + ':' + remotePlaylist.items.map((i) => i.id + i.thumb).join('|');
+      if (grid.dataset.sig !== sig) {
+        grid.dataset.sig = sig;
+        if (!remotePlaylist.items.length) {
+          const empty = document.createElement('div');
+          empty.className = 'lb-empty';
+          empty.textContent = t('Noch leer – mit ⤒ Fotos, Videos oder Musik hochladen.');
+          grid.replaceChildren(empty);
+          grid.style.display = 'block';
+          return markListCurrent(scroll);
+        }
+        grid.style.display = '';
+        grid.replaceChildren(
+          ...remotePlaylist.items.map((i) => {
+            const b = document.createElement('button');
+            b.className = 'lb-item';
+            b.dataset.id = i.id;
+            b.title = i.title;
+            b.translate = false;
+            if (i.thumb) {
+              const img = new Image();
+              img.loading = 'lazy';
+              img.decoding = 'async';
+              img.alt = '';
+              img.src = i.thumb;
+              b.appendChild(img);
+            } else {
+              const tile = document.createElement('span');
+              tile.className = 'lb-t';
+              tile.textContent = i.type === 'text' ? i.text || i.title : i.title;
+              if (i.type === 'text') Object.assign(tile.style, { background: i.bg, color: i.color });
+              b.appendChild(tile);
+            }
+            if (TYPE_MARK[i.type]) {
+              const m = document.createElement('span');
+              m.className = 'lb-type';
+              m.textContent = TYPE_MARK[i.type];
+              b.appendChild(m);
+            }
+            return b;
+          })
+        );
+      }
+      markListCurrent(scroll);
+    }
+    // aktuell gezeigten Eintrag hervorheben (und beim Öffnen dorthin scrollen)
+    function markListCurrent(scroll = false) {
+      if (listBar.hidden) return;
+      let cur = null;
+      for (const b of listBar.querySelectorAll('.lb-item')) {
+        const on = b.dataset.id === currentItem?.id;
+        b.classList.toggle('on', on);
+        b.classList.toggle('sel', delSel.has(b.dataset.id)); // Auswahl im Löschmodus (bleibt beim Neuaufbau)
+        if (on) cur = b;
+      }
+      updateDelBar();
+      if (scroll && cur) {
+        // nur den Container scrollen, nicht die Seite
+        const sc = listBar.querySelector('.lb-scroll');
+        sc.scrollTop += cur.getBoundingClientRect().top - sc.getBoundingClientRect().top - (sc.clientHeight - cur.offsetHeight) / 2;
+      }
+    }
+    // Playlist wechseln bzw. neu anlegen: gilt sofort für die gesteuerten Screens
+    const newForm = listBar.querySelector('.lb-newform');
+    const newName = listBar.querySelector('.lb-newname');
+    listBar.querySelector('.lb-select').addEventListener('change', (e) => send({ type: 'remote', action: 'playlist', id: e.target.value }));
+    function createPlaylist() {
+      send({ type: 'remote', action: 'newPlaylist', name: newName.value.trim() });
+      newForm.hidden = true;
+      newName.blur();
+      // nächster Schritt: hochladen – Knopf kurz hervorheben
+      const up = remoteBar.querySelector('[data-r=upload]');
+      up.classList.remove('hint');
+      void up.offsetWidth;
+      up.classList.add('hint');
+    }
+    newName.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter') return;
+      e.preventDefault();
+      createPlaylist();
+    });
+    listBar.addEventListener('click', (e) => {
+      e.stopPropagation(); // kein Menü
+      const l = e.target.closest('[data-l]')?.dataset.l;
+      if (l === 'new') {
+        newForm.hidden = !newForm.hidden;
+        if (!newForm.hidden) {
+          newName.value = '';
+          newName.focus();
+        }
+        return;
+      }
+      if (l === 'create') return createPlaylist();
+      if (l === 'cancel') return (newForm.hidden = true);
+      if (l === 'delmode') return setDelMode(!delMode);
+      if (l === 'deldone') return setDelMode(false);
+      if (l === 'delall') {
+        // alle auswählen bzw. – wenn schon alle gewählt – keine
+        const ids = (remotePlaylist?.items ?? []).map((i) => i.id);
+        const all = ids.length && ids.every((id) => delSel.has(id));
+        delSel.clear();
+        if (!all) ids.forEach((id) => delSel.add(id));
+        return markListCurrent();
+      }
+      if (l === 'delgo') return deleteSelected();
+      const b = e.target.closest('.lb-item');
+      if (!b) return;
+      if (delMode) {
+        delSel.has(b.dataset.id) ? delSel.delete(b.dataset.id) : delSel.add(b.dataset.id);
+        return markListCurrent();
+      }
+      send({ type: 'remote', action: 'show', itemId: b.dataset.id });
+      for (const x of listBar.querySelectorAll('.lb-item')) x.classList.toggle('on', x === b); // sofort sichtbar
+    });
+    listBar.addEventListener('pointerdown', (e) => e.stopPropagation());
+
+    // Löschen: Löschmodus an, Kacheln antippen (auswählen), einmal bestätigen
+    let delMode = false;
+    const delSel = new Set();
+    function setDelMode(on) {
+      delMode = on;
+      delSel.clear();
+      listBar.classList.toggle('del-mode', on);
+      listBar.querySelector('.lb-delbar').hidden = !on;
+      if (on) newForm.hidden = true;
+      markListCurrent();
+    }
+    function updateDelBar() {
+      // nicht mehr vorhandene Einträge aus der Auswahl nehmen
+      const present = new Set((remotePlaylist?.items ?? []).map((i) => i.id));
+      for (const id of delSel) if (!present.has(id)) delSel.delete(id);
+      const go = listBar.querySelector('.lb-delgo');
+      go.disabled = !delSel.size;
+      go.textContent = delSel.size ? t('Löschen ({0})', delSel.size) : t('Löschen');
+      listBar.querySelector('.lb-delhint').textContent = delSel.size ? t('{0} ausgewählt', delSel.size) : t('Zum Löschen antippen');
+    }
+    const lbAsk = document.getElementById('lbAsk');
+    lbAsk.addEventListener('click', (e) => e.stopPropagation()); // kein Menü
+    lbAsk.addEventListener('pointerdown', (e) => e.stopPropagation());
+    const askDelete = (count) =>
+      askScreen(
+        count === 1 ? t('1 Eintrag aus der Playlist löschen?') : t('{0} Einträge aus der Playlist löschen?', count),
+        t('Hochgeladene Dateien werden mitgelöscht, sofern keine andere Playlist sie verwendet. Dateien aus Medienordnern bleiben erhalten.')
+      );
+    /** Rückfrage im eigenen Fenster (Frage, Erklärung) – „Abbrechen“ ist vorausgewählt */
+    function askScreen(question, note = '') {
+      return new Promise((resolve) => {
+        lbAsk.querySelector('.ask-q').textContent = question;
+        lbAsk.querySelector('.ask-note').textContent = note;
+        lbAsk.querySelector('.ask-note').hidden = !note;
+        const done = (yes) => {
+          lbAsk.onclick = lbAsk.oncancel = null;
+          lbAsk.close();
+          resolve(yes);
+        };
+        lbAsk.onclick = (e) => {
+          const a = e.target.closest('button')?.dataset.a;
+          if (a) done(a === 'yes');
+          else if (e.target === lbAsk) done(false); // Klick daneben
+        };
+        lbAsk.oncancel = (e) => {
+          e.preventDefault();
+          done(false);
+        };
+        lbAsk.showModal();
+        lbAsk.querySelector('[data-a=no]').focus();
+      });
+    }
+    async function deleteSelected() {
+      if (!delSel.size || !(await askDelete(delSel.size))) return;
+      send({ type: 'remote', action: 'delete', itemIds: [...delSel] });
+      showUp('✓ ' + t('{0} gelöscht', delSel.size), null, 3000);
+      delSel.clear();
+      markListCurrent();
+    }
+
+    // -----------------------------------------------------------------------
+    // Hochladen (nur am steuernden Gerät): Fotos, Videos, Musik aus der Galerie. Bilder/Videos kommen in
+    // die aktive Playlist, Musik in die Musikliste; das erste neue Bild/Video läuft sofort.
+    // -----------------------------------------------------------------------
+
+    const upStatus = document.getElementById('upStatus');
+    const upInput = document.getElementById('upInput');
+    let upTimer = null;
+    function showUp(text, pct = null, ms = 0) {
+      clearTimeout(upTimer);
+      upStatus.hidden = false;
+      upStatus.textContent = text;
+      if (pct !== null) {
+        const bar = document.createElement('span');
+        bar.className = 'bar';
+        bar.style.width = pct + '%';
+        upStatus.appendChild(bar);
+      }
+      if (ms) upTimer = setTimeout(() => (upStatus.hidden = true), ms);
+    }
+    upInput.addEventListener('change', () => {
+      const files = [...upInput.files];
+      upInput.value = '';
+      if (!files.length || remote?.role !== 'controller') return;
+      const form = new FormData();
+      for (const f of files) form.append('files', f, f.name);
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', `/remote/upload?screen=${encodeURIComponent(screenId)}&key=${encodeURIComponent(remote.key ?? '')}`);
+      const label = t('{0} Dateien', files.length);
+      showUp(t('Lade hoch: {0}', label), 0);
+      xhr.upload.onprogress = (e) => e.lengthComputable && showUp(t('Lade hoch: {0}', label) + ` · ${Math.round((e.loaded / e.total) * 100)} %`, (e.loaded / e.total) * 100);
+      xhr.onload = () => {
+        let r = {};
+        try { r = JSON.parse(xhr.responseText); } catch {}
+        if (xhr.status !== 200) return showUp('⚠ ' + (r.error || t('Hochladen fehlgeschlagen')), null, 6000);
+        const parts = [];
+        if (r.added) parts.push(t('{0} neu', r.added));
+        if (r.music) parts.push(t('{0} Musik', r.music));
+        if (r.skipped) parts.push(t('{0} schon vorhanden', r.skipped));
+        showUp('✓ ' + (parts.join(' · ') || t('Nichts hochgeladen')), null, 4000);
+      };
+      xhr.onerror = () => showUp('⚠ ' + t('Hochladen fehlgeschlagen'), null, 6000);
+      xhr.send(form);
+    });
+
+    // -----------------------------------------------------------------------
+    // Projektions-Maske (z. B. Beamer auf eine Hauswand): Bereiche, in denen dieser Screen nichts zeigt.
+    // Punkte bezogen auf die Bildschirmfläche (0–1). Beim Bearbeiten an der Fernbedienung zeigt der Screen
+    // zusätzlich ein Drahtgitter, Umrisse und Eckpunkte – so lassen sie sich direkt an der Wand ausrichten.
+    // -----------------------------------------------------------------------
+
+    const maskLayer = document.getElementById('maskLayer');
+    let maskShown = { masks: [], off: false, edit: false, draft: null, sel: null };
+    function setMasks(m) {
+      if (!m) return;
+      maskShown = m;
+      renderMasks();
+    }
+    // Formen: Ellipse wird aus ihrem Rahmen [x1, y1, x2, y2] berechnet; Griffe = Rahmenecken, sonst die Eckpunkte
+    const r4 = (n) => Math.round(n * 10000) / 10000;
+    function ellipsePts([x1, y1, x2, y2], steps = 48) {
+      const cx = (x1 + x2) / 2, cy = (y1 + y2) / 2, rx = Math.abs(x2 - x1) / 2, ry = Math.abs(y2 - y1) / 2;
+      const pts = [];
+      for (let i = 0; i < steps; i++) {
+        const a = (2 * Math.PI * i) / steps;
+        pts.push(r4(cx + rx * Math.cos(a)), r4(cy + ry * Math.sin(a)));
+      }
+      return pts;
+    }
+    function handlesOf(m) {
+      if (m.shape === 'ellipse' && m.box) {
+        const [x1, y1, x2, y2] = m.box;
+        return [[x1, y1], [x2, y1], [x2, y2], [x1, y2]];
+      }
+      const out = [];
+      for (let i = 0; i + 1 < m.pts.length; i += 2) out.push([m.pts[i], m.pts[i + 1]]);
+      return out;
+    }
+    /**
+     * Kantengriffe (Mitte jeder Seite): beim Rechteck (4 Ecken) und bei der Ellipse (Seiten ihres Rahmens).
+     * Kante e verbindet Ecke e und e+1 – oben, rechts, unten, links.
+     */
+    function edgesOf(m) {
+      if (m.shape === 'ellipse' && m.box) {
+        const [x1, y1, x2, y2] = m.box;
+        return [[(x1 + x2) / 2, y1], [x2, (y1 + y2) / 2], [(x1 + x2) / 2, y2], [x1, (y1 + y2) / 2]];
+      }
+      if (m.shape !== 'rect' || m.pts.length !== 8) return [];
+      const p = m.pts;
+      return [0, 1, 2, 3].map((e) => {
+        const a = e * 2, b = ((e + 1) % 4) * 2;
+        return [(p[a] + p[b]) / 2, (p[a + 1] + p[b + 1]) / 2];
+      });
+    }
+    const ptsPx = (pts, W, H) => {
+      let out = '';
+      for (let i = 0; i + 1 < pts.length; i += 2) out += `${(pts[i] * W).toFixed(1)},${(pts[i + 1] * H).toFixed(1)} `;
+      return out;
+    };
+    function renderMasks() {
+      const W = innerWidth, H = innerHeight;
+      const { masks = [], off, edit, draft, sel } = maskShown;
+      maskLayer.setAttribute('viewBox', `0 0 ${W} ${H}`);
+      let svg = '';
+      if (edit) {
+        // Drahtgitter: Zehntel kräftiger, Zwanzigstel dünn
+        for (let i = 1; i < 20; i++) {
+          const strong = i % 2 === 0;
+          const a = strong ? 0.35 : 0.15;
+          svg += `<line x1="${(W * i) / 20}" y1="0" x2="${(W * i) / 20}" y2="${H}" stroke="rgba(34,211,238,${a})" stroke-width="1"/>`;
+          svg += `<line x1="0" y1="${(H * i) / 20}" x2="${W}" y2="${(H * i) / 20}" stroke="rgba(34,211,238,${a})" stroke-width="1"/>`;
+        }
+        svg += `<rect x="1" y="1" width="${W - 2}" height="${H - 2}" fill="none" stroke="#22d3ee" stroke-width="2"/>`;
+      }
+      // Bereiche nicht übermalen, sondern aus dem Inhalt ausschneiden (siehe cutMasks) – hier nur die Umrisse fürs Bearbeiten
+      cutMasks(off ? [] : masks, W, H, !!maskShown.invert, maskShown.feather ?? 0);
+      if (edit) {
+        masks.forEach((m, p) => {
+          const chosen = sel?.p === p;
+          // ausgeschaltet: gestrichelt (es wird gerade nichts ausgeschnitten)
+          svg += `<polygon points="${ptsPx(m.pts, W, H)}" fill="none" stroke="${chosen ? '#facc15' : '#22d3ee'}" stroke-width="${chosen ? 3 : 2}"${off ? ' stroke-dasharray="8 6"' : ''}/>`;
+        });
+        masks.forEach((m, p) => {
+          if (m.shape === 'ellipse' && m.box && sel?.p === p) {
+            const [x1, y1, x2, y2] = m.box;
+            svg += `<rect x="${Math.min(x1, x2) * W}" y="${Math.min(y1, y2) * H}" width="${Math.abs(x2 - x1) * W}" height="${Math.abs(y2 - y1) * H}" fill="none" stroke="#facc15" stroke-width="1.5" stroke-dasharray="6 5"/>`;
+          }
+          handlesOf(m).forEach(([x, y], v) => {
+            const on = sel?.p === p && sel.v === v;
+            svg += `<circle cx="${x * W}" cy="${y * H}" r="${on ? 9 : 6}" fill="${on ? '#facc15' : '#22d3ee'}" stroke="#000" stroke-width="1.5"/>`;
+          });
+          if (sel?.p === p)
+            edgesOf(m).forEach(([x, y], e) => {
+              const on = sel.e === e, s = on ? 8 : 5;
+              svg += `<rect x="${x * W - s}" y="${y * H - s}" width="${2 * s}" height="${2 * s}" fill="${on ? '#facc15' : '#fff'}" stroke="#000" stroke-width="1.5"/>`;
+            });
+        });
+        if (draft?.length >= 2) {
+          svg += `<polyline points="${ptsPx(draft, W, H)}" fill="none" stroke="#facc15" stroke-width="3" stroke-dasharray="10 6"/>`;
+          for (let i = 0; i + 1 < draft.length; i += 2) svg += `<circle cx="${draft[i] * W}" cy="${draft[i + 1] * H}" r="${i ? 6 : 9}" fill="#facc15" stroke="#000" stroke-width="1.5"/>`;
+        }
+      }
+      maskLayer.innerHTML = svg;
+    }
+    /**
+     * Ausschneiden: Inhalt und Standbild bekommen eine Maske mit Löchern – dort wird schlicht nichts gezeichnet,
+     * zu sehen ist der Seitenhintergrund (schwarz = Beamer gibt kein Licht ab; mit ?transparent=1 durchsichtig).
+     */
+    const cutTargets = [document.getElementById('stage'), document.getElementById('cover')];
+    let lastCut = '';
+    function cutMasks(masks, W, H, invert = false, feather = 0) {
+      let url = 'none';
+      if (masks.length) {
+        // weiche Kanten: Bereiche in der Maske weichzeichnen (Stärke bezogen auf die kürzere Bildschirmseite)
+        const blur = (feather / 1000) * Math.min(W, H) * 0.6;
+        // SVG-Bild: weiß = sichtbar, Bereiche über eine SVG-Maske ausgespart (auch bei überlappenden Bereichen);
+        // umgekehrt: nur die Bereiche sichtbar
+        const holes = masks.map((m) => `<polygon points="${ptsPx(m.pts, W, H)}" fill="${invert ? '#fff' : '#000'}"/>`).join('');
+        const soft = blur > 0.3 ? `<filter id="b" x="-20%" y="-20%" width="140%" height="140%" filterUnits="userSpaceOnUse"><feGaussianBlur stdDeviation="${blur.toFixed(1)}"/></filter>` : '';
+        const group = `<g${soft ? ' filter="url(#b)"' : ''}>${holes}</g>`;
+        const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}"><defs>${soft}<mask id="m" maskUnits="userSpaceOnUse" x="0" y="0" width="${W}" height="${H}"><rect width="${W}" height="${H}" fill="${invert ? '#000' : '#fff'}"/>${group}</mask></defs><rect width="${W}" height="${H}" fill="#fff" mask="url(#m)"/></svg>`;
+        url = `url("data:image/svg+xml,${encodeURIComponent(svg)}")`;
+      }
+      if (url === lastCut) return;
+      lastCut = url;
+      for (const el of cutTargets) {
+        for (const p of ['maskImage', 'webkitMaskImage']) el.style[p] = url;
+        for (const p of ['maskSize', 'webkitMaskSize']) el.style[p] = '100% 100%';
+        for (const p of ['maskRepeat', 'webkitMaskRepeat']) el.style[p] = 'no-repeat';
+      }
+    }
+    // ?transparent=1: Seitenhintergrund durchsichtig (z. B. als Browser-Quelle in OBS über einem Video)
+    if (params.get('transparent') === '1') {
+      document.documentElement.style.background = 'transparent';
+      document.body.style.background = 'transparent';
+    }
+
+    // Bildschirmgröße an den Server (Seitenverhältnis für den Editor an der Fernbedienung)
+    let viewportTimer = null;
+    const reportViewport = () => send({ type: 'viewport', w: innerWidth, h: innerHeight });
+    addEventListener('resize', () => {
+      renderMasks();
+      clearTimeout(viewportTimer);
+      viewportTimer = setTimeout(reportViewport, 400);
+    });
+
+    // --- Editor an der Fernbedienung ---------------------------------------
+    const maskBar = document.getElementById('maskBar');
+    const mkStage = maskBar.querySelector('.mk-stage');
+    const mkSvg = maskBar.querySelector('.mk-svg');
+    // tool: gewählte Form zum Aufziehen (rect | ellipse | tri), drawing: freies Vieleck im Entstehen
+    // scale: Skalier-Modus (ziehen und Pfeile ändern die Größe statt der Lage)
+    const mk = { screenId: null, masks: [], aspect: 16 / 9, sel: null, drawing: null, drag: null, loaded: false, tool: null, scale: false };
+    const mkFingers = new Map(); // pointerId -> [x, y] (0–1) für den Zwei-Finger-Zoom
+    const HIT = 22; // Fangradius in Bildschirmpixeln (Finger)
+    const STEP = 0.002; // Feinschritt der Pfeile (0,2 % der Breite/Höhe)
+
+    function setMaskBar(on) {
+      maskBar.hidden = !(on && remote?.role === 'controller');
+      remoteBar.querySelector('[data-r=mask]').classList.toggle('on', !maskBar.hidden);
+      if (maskBar.hidden) {
+        if (mk.screenId) send({ type: 'mask', op: 'edit', screenId: null }); // Drahtgitter am Screen aus
+        mk.screenId = null;
+        mk.loaded = false;
+        return;
+      }
+      setPen(false);
+      setSoundBar(false);
+      setListBar(false);
+      send({ type: 'mask', op: 'edit' }); // bisheriger bzw. erster gesteuerter Screen
+    }
+
+    function applyMaskState(m) {
+      // anderer Screen (oder erstes Laden): dessen Masken übernehmen, sonst die eigene Bearbeitung behalten
+      if (m.screenId !== mk.screenId || !mk.loaded) {
+        mk.masks = (m.masks ?? []).map((x) => ({ id: x.id, pts: [...x.pts], ...(x.shape && { shape: x.shape }), ...(x.box && { box: [...x.box] }) }));
+        mk.tool = null;
+        mk.sel = null;
+        mk.drawing = null;
+        mk.loaded = true;
+      }
+      mk.screenId = m.screenId;
+      mk.aspect = m.aspect || 16 / 9;
+      maskBar.querySelector('[data-k=on]').checked = !m.off;
+      maskBar.querySelector('[data-k=inv]').checked = !!m.invert;
+      mk.invert = !!m.invert;
+      if (!mk.softDragging) {
+        mk.feather = m.feather ?? 0;
+        maskBar.querySelector('[data-k=soft]').value = mk.feather;
+        maskBar.querySelector('.mk-softval').textContent = mk.feather;
+      }
+      maskBar.querySelector('.mk-screens').replaceChildren(
+        ...(m.screens ?? []).map((x) => {
+          const b = document.createElement('button');
+          b.className = 'm-chip' + (x.id === m.screenId ? ' on' : '') + (x.online ? '' : ' off');
+          b.dataset.screen = x.id;
+          b.translate = false;
+          b.textContent = (x.id === m.screenId ? '✓ ' : '') + x.name;
+          return b;
+        })
+      );
+      layoutMaskStage();
+      renderMaskEditor();
+    }
+
+    // Zeichenfläche im Seitenverhältnis des Screens, so groß wie möglich (höchstens 42 % der Höhe)
+    function layoutMaskStage() {
+      if (maskBar.hidden) return;
+      const maxW = maskBar.clientWidth - 24;
+      const maxH = innerHeight * 0.42;
+      const w = Math.min(maxW, maxH * mk.aspect);
+      mkStage.style.width = w + 'px';
+      mkStage.style.height = w / mk.aspect + 'px';
+      // aktuelles Bild als Orientierung im Hintergrund
+      const img = currentItem?.type === 'image' ? currentItem.src : null;
+      mkStage.style.backgroundImage = img ? `url("${img}")` : '';
+    }
+    addEventListener('resize', () => !maskBar.hidden && (layoutMaskStage(), renderMaskEditor()));
+
+    function renderMaskEditor() {
+      if (maskBar.hidden) return;
+      const W = 1000, H = 1000 / mk.aspect;
+      const k = W / (mkStage.clientWidth || 1); // Bildschirmpixel → Einheiten
+      mkSvg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+      // Schachbrett = hier wird nichts angezeigt (durchsichtig)
+      let svg = `<defs><pattern id="mkchk" width="${16 * k}" height="${16 * k}" patternUnits="userSpaceOnUse"><rect width="${16 * k}" height="${16 * k}" fill="#d1d5db"/><rect width="${8 * k}" height="${8 * k}" fill="#9ca3af"/><rect x="${8 * k}" y="${8 * k}" width="${8 * k}" height="${8 * k}" fill="#9ca3af"/></pattern></defs>`;
+      for (let i = 1; i < 10; i++) {
+        svg += `<line x1="${(W * i) / 10}" y1="0" x2="${(W * i) / 10}" y2="${H}" stroke="rgba(34,211,238,.25)" stroke-width="${k}"/>`;
+        svg += `<line x1="0" y1="${(H * i) / 10}" x2="${W}" y2="${(H * i) / 10}" stroke="rgba(34,211,238,.25)" stroke-width="${k}"/>`;
+      }
+      const done = mk.masks.filter((m) => m !== mk.drawing);
+      // weiche Kanten auch in der Vorschau (gleiche Stärke wie am Screen, umgerechnet auf die Zeichenfläche)
+      const blurE = ((mk.feather ?? 0) / 1000) * Math.min(W, H) * 0.6;
+      if (blurE > 0.3) svg += `<defs><filter id="mkblur" x="-20%" y="-20%" width="140%" height="140%" filterUnits="userSpaceOnUse"><feGaussianBlur stdDeviation="${blurE.toFixed(2)}"/></filter></defs>`;
+      const fblur = blurE > 0.3 ? ' filter="url(#mkblur)"' : '';
+      if (mk.invert && done.length) {
+        // umgekehrt: außerhalb der Bereiche wird nichts gezeigt (Schachbrett), innen das Bild
+        svg += `<defs><mask id="mkinv" maskUnits="userSpaceOnUse" x="0" y="0" width="${W}" height="${H}"><rect width="${W}" height="${H}" fill="#fff"/><g${fblur}>${done.map((m) => `<polygon points="${ptsPx(m.pts, W, H)}" fill="#000"/>`).join('')}</g></mask></defs>`;
+        svg += `<rect width="${W}" height="${H}" fill="url(#mkchk)" fill-opacity=".85" mask="url(#mkinv)"/>`;
+      }
+      mk.masks.forEach((m, p) => {
+        if (m === mk.drawing) return;
+        const chosen = mk.sel?.p === p;
+        // Füllung (ggf. weich) und Umriss getrennt, damit der Umriss scharf bleibt
+        if (!mk.invert) svg += `<polygon points="${ptsPx(m.pts, W, H)}" fill="url(#mkchk)" fill-opacity=".85"${fblur}/>`;
+        svg += `<polygon points="${ptsPx(m.pts, W, H)}" fill="none" stroke="${chosen ? '#facc15' : '#22d3ee'}" stroke-width="${(chosen ? 2.5 : 1.5) * k}"/>`;
+      });
+      mk.masks.forEach((m, p) => {
+        const isDraft = m === mk.drawing;
+        if (m.shape === 'ellipse' && m.box && mk.sel?.p === p) {
+          const [x1, y1, x2, y2] = m.box;
+          svg += `<rect x="${Math.min(x1, x2) * W}" y="${Math.min(y1, y2) * H}" width="${Math.abs(x2 - x1) * W}" height="${Math.abs(y2 - y1) * H}" fill="none" stroke="#facc15" stroke-width="${k}" stroke-dasharray="${5 * k} ${4 * k}"/>`;
+        }
+        handlesOf(m).forEach(([x, y], v) => {
+          const on = mk.sel?.p === p && mk.sel.v === v;
+          svg += `<circle cx="${x * W}" cy="${y * H}" r="${(on || (isDraft && v === 0) ? 7 : 5) * k}" fill="${on || isDraft ? '#facc15' : '#22d3ee'}" stroke="#000" stroke-width="${k}"/>`;
+        });
+        // Kantengriffe nur am gewählten Rechteck bzw. Kreis: Breite oder Höhe ändern
+        if (mk.sel?.p === p)
+          edgesOf(m).forEach(([x, y], e) => {
+            const on = mk.sel.e === e, s = (on ? 6 : 4.5) * k;
+            svg += `<rect x="${x * W - s}" y="${y * H - s}" width="${2 * s}" height="${2 * s}" rx="${k}" fill="${on ? '#facc15' : '#fff'}" stroke="#000" stroke-width="${k}"/>`;
+          });
+      });
+      if (mk.drawing?.pts.length >= 2) svg += `<polyline points="${ptsPx(mk.drawing.pts, W, H)}" fill="none" stroke="#facc15" stroke-width="${2 * k}" stroke-dasharray="${6 * k} ${4 * k}"/>`;
+      mkSvg.innerHTML = svg;
+      // Knöpfe und Hinweis
+      const q = (k2) => maskBar.querySelector(`[data-k=${k2}]`);
+      maskBar.querySelector('.mk-shapes').hidden = !!mk.drawing;
+      for (const b of maskBar.querySelectorAll('.mk-shapes button')) b.classList.toggle('on', b.dataset.shape === mk.tool);
+      q('close').hidden = !mk.drawing;
+      q('close').disabled = (mk.drawing?.pts.length ?? 0) < 6;
+      q('del').disabled = !mk.sel || !!mk.drawing;
+      q('scale').classList.toggle('on', mk.scale);
+      q('scale').disabled = !!mk.drawing;
+      for (const b of maskBar.querySelectorAll('.mk-nudge')) {
+        b.disabled = !mk.sel || !!mk.drawing;
+        b.title = mk.scale ? t({ l: 'Schmaler', r: 'Breiter', u: 'Höher', d: 'Niedriger' }[b.dataset.k]) : t({ l: 'Fein nach links', r: 'Fein nach rechts', u: 'Fein nach oben', d: 'Fein nach unten' }[b.dataset.k]);
+      }
+      maskBar.classList.toggle('scaling', mk.scale);
+      q('clear').disabled = !mk.masks.length;
+      maskBar.querySelector('.mk-hint').textContent = !mk.screenId
+        ? t('Screen wählen')
+        : mk.drawing
+          ? t('Ecken antippen – zum Schließen den ersten Punkt antippen')
+          : mk.tool
+            ? t('Auf der Fläche aufziehen – oder antippen für Standardgröße')
+            : mk.scale && !(mk.sel?.e >= 0)
+              ? mk.sel
+                ? t('Skalieren: ziehen = größer/kleiner, ← → Breite, ↑ ↓ Höhe')
+                : t('Skalieren: Bereich antippen')
+          : mk.sel?.e >= 0
+            ? mk.scale
+              ? t('Kante gewählt: ziehen ändert Breite bzw. Höhe beidseitig um die Mitte')
+              : t('Kante gewählt: ziehen oder Pfeile ändern Breite bzw. Höhe')
+          : mk.sel?.v >= 0
+            ? t('Punkt gewählt: ziehen oder mit den Pfeilen fein verschieben')
+            : mk.sel
+              ? t('Bereich gewählt: ziehen verschiebt ihn, Ecken einzeln anfassen')
+              : mk.masks.length
+                ? mk.masks.length === 1 ? t('1 Bereich – antippen zum Bearbeiten') : t('{0} Bereiche – antippen zum Bearbeiten', mk.masks.length)
+                : t('Form wählen: ⬠ frei, ▭ Rechteck, ◯ Kreis, △ Dreieck');
+    }
+
+    // Änderungen höchstens einmal pro Bild an den Server (der Screen zeichnet live mit)
+    let maskSendFrame = 0;
+    function sendMasks() {
+      maskSendFrame ||= requestAnimationFrame(() => {
+        maskSendFrame = 0;
+        if (!mk.screenId) return;
+        send({
+          type: 'mask',
+          op: 'set',
+          masks: mk.masks.filter((m) => m !== mk.drawing),
+          draft: mk.drawing?.pts ?? null,
+          sel: mk.sel && !mk.drawing ? { p: mk.masks.filter((m) => m !== mk.drawing).indexOf(mk.masks[mk.sel.p]), v: mk.sel.v, e: mk.sel.e ?? -1 } : null,
+        });
+      });
+    }
+    const changedMask = () => {
+      renderMaskEditor();
+      sendMasks();
+    };
+
+    // Fingerposition → Punkt auf dem Screen (0–1)
+    function mkPoint(e) {
+      const r = mkSvg.getBoundingClientRect();
+      return [Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)), Math.min(1, Math.max(0, (e.clientY - r.top) / r.height))];
+    }
+    /** Abstand zweier Punkte (0–1) in Bildschirmpixeln der Zeichenfläche */
+    function mkPx(a, b) {
+      const r = mkSvg.getBoundingClientRect();
+      return Math.hypot((a[0] - b[0]) * r.width, (a[1] - b[1]) * r.height);
+    }
+    function mkDist(a, pts, i) {
+      const r = mkSvg.getBoundingClientRect();
+      return Math.hypot((a[0] - pts[i]) * r.width, (a[1] - pts[i + 1]) * r.height);
+    }
+    function inPolygon([x, y], pts) {
+      let inside = false;
+      for (let i = 0, j = pts.length - 2; i < pts.length; j = i, i += 2) {
+        const [xi, yi, xj, yj] = [pts[i], pts[i + 1], pts[j], pts[j + 1]];
+        if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+      }
+      return inside;
+    }
+    /**
+     * Kante e verschieben: Rechteck – beide Ecken senkrecht zur Kante (bleibt rechteckig, auch schräg);
+     * Ellipse – die Seite ihres Rahmens. both: gegenüberliegende Kante gleich weit in die Gegenrichtung (um die Mitte).
+     * dx/dy: Verschiebung in Bildschirmanteilen (0–1).
+     */
+    function moveEdge(m, orig, e, dx, dy, both = false) {
+      if (m.shape === 'ellipse' && orig.box) {
+        const box = [...orig.box];
+        const d = e % 2 ? dx : dy; // oben/unten: senkrecht, rechts/links: waagerecht
+        const [i, j] = [[1, 3], [2, 0], [3, 1], [0, 2]][e]; // eigene Seite, gegenüberliegende Seite
+        box[i] = r4(box[i] + d);
+        if (both) box[j] = r4(box[j] - d);
+        m.box = box;
+        return shapeFromBox(m);
+      }
+      const p = [...orig.pts];
+      const a = e * 2, b = ((e + 1) % 4) * 2;
+      // Normale der Kante in Bildschirmpixeln (x mal Seitenverhältnis), Verschiebung darauf projiziert
+      const ex = (p[b] - p[a]) * mk.aspect, ey = p[b + 1] - p[a + 1];
+      const len = Math.hypot(ex, ey) || 1;
+      const nx = -ey / len, ny = ex / len;
+      const dist = dx * mk.aspect * nx + dy * ny;
+      const mx = (nx * dist) / mk.aspect, my = ny * dist;
+      for (const i of [a, b]) (p[i] = r4(p[i] + mx)), (p[i + 1] = r4(p[i + 1] + my));
+      if (both) {
+        const c = ((e + 2) % 4) * 2, d2 = ((e + 3) % 4) * 2;
+        for (const i of [c, d2]) (p[i] = r4(p[i] - mx)), (p[i + 1] = r4(p[i + 1] - my));
+      }
+      m.pts = p;
+    }
+
+    /** Mitte einer Form (Mitte ihres Rahmens bzw. ihrer Eckpunkte) */
+    function shapeCenter(m) {
+      const xs = [], ys = [];
+      for (const [x, y] of m.shape === 'ellipse' && m.box ? handlesOf(m) : handlesOf({ pts: m.pts })) xs.push(x), ys.push(y);
+      return [(Math.min(...xs) + Math.max(...xs)) / 2, (Math.min(...ys) + Math.max(...ys)) / 2];
+    }
+    /** Form um ihre Mitte skalieren: sx/sy bezogen auf den Ausgangszustand orig ({ pts, box }) */
+    function scaleShape(m, orig, c, sx, sy) {
+      const f = (n, i) => r4(Math.min(1.5, Math.max(-0.5, c[i % 2] + (n - c[i % 2]) * (i % 2 ? sy : sx))));
+      if (orig.box) {
+        m.box = orig.box.map(f);
+        shapeFromBox(m);
+      } else m.pts = orig.pts.map(f);
+    }
+    const snapshot = (m) => ({ pts: [...m.pts], box: m.box && [...m.box] });
+
+    /** Punkte einer Form aus ihrem Rahmen (beim Aufziehen; die Ellipse auch beim Bearbeiten) */
+    function shapeFromBox(m) {
+      const [x1, y1, x2, y2] = m.box;
+      if (m.shape === 'ellipse') m.pts = ellipsePts(m.box);
+      else if (m.shape === 'tri') m.pts = [(x1 + x2) / 2, Math.min(y1, y2), Math.max(x1, x2), Math.max(y1, y2), Math.min(x1, x2), Math.max(y1, y2)].map(r4);
+      else m.pts = [x1, y1, x2, y1, x2, y2, x1, y2].map(r4);
+    }
+    /** Aufziehen beendet: angetippt = Standardgröße (auf dem Screen quadratisch bzw. kreisrund) */
+    function finishShape(m, start) {
+      const [x1, y1, x2, y2] = m.box;
+      const r = mkStage.getBoundingClientRect();
+      if (Math.abs(x2 - x1) * r.width < 12 && Math.abs(y2 - y1) * r.height < 12) {
+        const w = 0.07, h = 0.07 * mk.aspect; // halbe Kantenlänge, auf dem Screen gleich lang
+        m.box = [start[0] - w, start[1] - h, start[0] + w, start[1] + h].map(r4);
+      } else m.box = [Math.min(x1, x2), Math.min(y1, y2), Math.max(x1, x2), Math.max(y1, y2)].map(r4);
+      shapeFromBox(m);
+      if (m.shape !== 'ellipse') delete m.box; // Rechteck/Dreieck: ab jetzt freie Eckpunkte
+      changedMask();
+    }
+
+    function finishDrawing() {
+      const d = mk.drawing;
+      mk.drawing = null;
+      if (d.pts.length < 6) mk.masks = mk.masks.filter((m) => m !== d); // weniger als 3 Ecken: verwerfen
+      else mk.sel = { p: mk.masks.indexOf(d), v: -1 };
+      changedMask();
+    }
+
+    mkSvg.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!mk.screenId) return;
+      const pt = mkPoint(e);
+      mkSvg.setPointerCapture(e.pointerId);
+      mkFingers.set(e.pointerId, pt);
+      // zweiter Finger auf einem gewählten Bereich: Zwei-Finger-Zoom (gleichmäßig um die Mitte)
+      if (mkFingers.size === 2 && mk.sel && !mk.drawing) {
+        const m = mk.masks[mk.sel.p];
+        const [a, b] = [...mkFingers.values()];
+        mk.drag = { type: 'pinch', m, c: shapeCenter(m), d0: mkPx(a, b), orig: snapshot(m) };
+        return;
+      }
+      if (mkFingers.size > 1) return;
+      const edgeHit = mk.sel && (edgesOf(mk.masks[mk.sel.p] ?? { pts: [] }) ?? []).some((h) => mkDist(pt, h, 0) < HIT);
+      if (mk.scale && !mk.drawing && !mk.tool && !edgeHit) {
+        // Skalier-Modus: Bereich unter dem Finger wählen (sonst den gewählten), dann ziehen = Größe
+        for (let p = mk.masks.length - 1; p >= 0; p--) if (inPolygon(pt, mk.masks[p].pts)) { mk.sel = { p, v: -1 }; break; }
+        if (mk.sel) {
+          const m = mk.masks[mk.sel.p];
+          mk.sel.v = -1;
+          mk.drag = { type: 'scale', m, c: shapeCenter(m), start: pt, orig: snapshot(m) };
+        }
+        return changedMask();
+      }
+      if (mk.tool) {
+        // Form aufziehen: Rahmen von hier bis zum Loslassen
+        const m = { id: Math.random().toString(36).slice(2, 10), shape: mk.tool, box: [...pt, ...pt], pts: [] };
+        shapeFromBox(m);
+        mk.masks.push(m);
+        mk.sel = { p: mk.masks.length - 1, v: -1 };
+        mk.drag = { type: 'create', m, start: pt };
+        mk.tool = null;
+        return changedMask();
+      }
+      if (mk.drawing) {
+        // Zeichnen: Punkt setzen; erster Punkt antippen schließt den Bereich
+        if (mk.drawing.pts.length >= 6 && mkDist(pt, mk.drawing.pts, 0) < HIT) return finishDrawing();
+        mk.drawing.pts.push(...pt);
+        mk.drag = { type: 'v', m: mk.drawing, i: mk.drawing.pts.length - 2 }; // gleich nachziehen möglich
+        return changedMask();
+      }
+      // Kantengriff des gewählten Bereichs: Breite bzw. Höhe ändern (im Skalier-Modus beidseitig)
+      if (mk.sel) {
+        const m = mk.masks[mk.sel.p];
+        const es = m ? edgesOf(m) : [];
+        for (let e = 0; e < es.length; e++) {
+          if (mkDist(pt, es[e], 0) < HIT) {
+            mk.sel = { p: mk.sel.p, v: -1, e };
+            mk.drag = { type: 'edge', m, e, start: pt, orig: snapshot(m), both: mk.scale };
+            return changedMask();
+          }
+        }
+      }
+      // Eckpunkt anfassen (gewählter Bereich zuerst), sonst Bereich wählen und verschieben
+      const order = mk.masks.map((m, p) => p).sort((a, b) => (b === mk.sel?.p) - (a === mk.sel?.p));
+      for (const p of order) {
+        const m = mk.masks[p];
+        const hs = handlesOf(m);
+        for (let v = 0; v < hs.length; v++) {
+          if (mkDist(pt, hs[v], 0) < HIT) {
+            mk.sel = { p, v, e: -1 };
+            // Ellipse: Rahmenecke ziehen, sonst den Eckpunkt
+            mk.drag = m.shape === 'ellipse' && m.box ? { type: 'corner', m, c: v } : { type: 'v', m, i: v * 2 };
+            return changedMask();
+          }
+        }
+      }
+      for (let p = mk.masks.length - 1; p >= 0; p--) {
+        if (inPolygon(pt, mk.masks[p].pts)) {
+          const m = mk.masks[p];
+          mk.sel = { p, v: -1, e: -1 };
+          mk.drag = { type: 'poly', m, start: pt, orig: [...m.pts], origBox: m.box && [...m.box] };
+          return changedMask();
+        }
+      }
+      mk.sel = null;
+      changedMask();
+    });
+    mkSvg.addEventListener('pointermove', (e) => {
+      if (mkFingers.has(e.pointerId)) mkFingers.set(e.pointerId, mkPoint(e));
+      if (!mk.drag) return;
+      e.preventDefault();
+      const pt = mkPoint(e);
+      const d = mk.drag;
+      if (d.type === 'pinch') {
+        if (mkFingers.size < 2) return;
+        const [a, b] = [...mkFingers.values()];
+        const f = Math.max(0.05, mkPx(a, b) / (d.d0 || 1));
+        scaleShape(d.m, d.orig, d.c, f, f);
+        return changedMask();
+      }
+      if (d.type === 'edge') {
+        moveEdge(d.m, d.orig, d.e, pt[0] - d.start[0], pt[1] - d.start[1], d.both);
+        return changedMask();
+      }
+      if (d.type === 'scale') {
+        // Faktor = Abstand zur Mitte jetzt / beim Aufsetzen (nach außen größer, nach innen kleiner)
+        const d0 = mkPx(d.start, d.c);
+        if (d0 < 6) return;
+        const f = Math.max(0.05, mkPx(pt, d.c) / d0);
+        scaleShape(d.m, d.orig, d.c, f, f);
+        return changedMask();
+      }
+      const clamp = (n) => Math.min(1.5, Math.max(-0.5, n));
+      if (d.type === 'v') [d.m.pts[d.i], d.m.pts[d.i + 1]] = pt;
+      else if (d.type === 'create') {
+        d.m.box = [...d.start, ...pt];
+        shapeFromBox(d.m);
+      } else if (d.type === 'corner') {
+        // Rahmenecke 0 oben links, 1 oben rechts, 2 unten rechts, 3 unten links
+        const [xi, yi] = [[0, 1], [2, 1], [2, 3], [0, 3]][d.c];
+        d.m.box[xi] = pt[0];
+        d.m.box[yi] = pt[1];
+        shapeFromBox(d.m);
+      } else {
+        d.m.pts = d.orig.map((n, i) => clamp(n + pt[i % 2] - d.start[i % 2]));
+        if (d.origBox) d.m.box = d.origBox.map((n, i) => clamp(n + pt[i % 2] - d.start[i % 2]));
+      }
+      changedMask();
+    });
+    const mkUp = (e) => {
+      mkFingers.delete(e.pointerId);
+      if (mk.drag?.type === 'pinch' && mkFingers.size) return; // ein Finger liegt noch: Zoom endet erst mit beiden
+      if (mk.drag?.type === 'create') finishShape(mk.drag.m, mk.drag.start);
+      mk.drag = null;
+    };
+    mkSvg.addEventListener('pointerup', mkUp);
+    mkSvg.addEventListener('pointercancel', mkUp);
+
+    // Feinschritt; gedrückt halten wiederholt
+    function nudge(dir) {
+      if (!mk.sel || mk.drawing) return;
+      const [dx, dy] = { l: [-STEP, 0], r: [STEP, 0], u: [0, -STEP], d: [0, STEP] }[dir];
+      const m = mk.masks[mk.sel.p];
+      if (!m) return;
+      if (mk.sel.e >= 0) {
+        // gewählte Kante fein verschieben (im Skalier-Modus beidseitig)
+        moveEdge(m, snapshot(m), mk.sel.e, dx, dy, mk.scale);
+        return changedMask();
+      }
+      if (mk.scale) {
+        // Skalier-Modus: ← schmaler, → breiter, ↑ höher, ↓ niedriger (je 1 % um die Mitte)
+        const [sx, sy] = { l: [0.99, 1], r: [1.01, 1], u: [1, 1.01], d: [1, 0.99] }[dir];
+        mk.sel.v = -1;
+        scaleShape(m, snapshot(m), shapeCenter(m), sx, sy);
+        return changedMask();
+      }
+      const move = (i) => {
+        m.pts[i] = Math.round(Math.min(1.5, Math.max(-0.5, m.pts[i] + dx)) * 10000) / 10000;
+        m.pts[i + 1] = Math.round(Math.min(1.5, Math.max(-0.5, m.pts[i + 1] + dy)) * 10000) / 10000;
+      };
+      if (m.shape === 'ellipse' && m.box) {
+        // Ellipse: gewählte Rahmenecke bzw. ganzen Rahmen verschieben
+        const corners = mk.sel.v >= 0 ? [[[0, 1], [2, 1], [2, 3], [0, 3]][mk.sel.v]] : [[0, 1], [2, 3]];
+        for (const [xi, yi] of corners) {
+          m.box[xi] = r4(Math.min(1.5, Math.max(-0.5, m.box[xi] + dx)));
+          m.box[yi] = r4(Math.min(1.5, Math.max(-0.5, m.box[yi] + dy)));
+        }
+        shapeFromBox(m);
+      } else if (mk.sel.v >= 0) move(mk.sel.v * 2);
+      else for (let i = 0; i < m.pts.length; i += 2) move(i);
+      changedMask();
+    }
+    let nudgeTimer = null;
+    const stopNudge = () => clearTimeout(nudgeTimer);
+    for (const b of maskBar.querySelectorAll('.mk-nudge')) {
+      b.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        const dir = b.dataset.k;
+        nudge(dir);
+        const again = (delay) => (nudgeTimer = setTimeout(() => (nudge(dir), again(60)), delay));
+        again(380);
+      });
+      for (const ev of ['pointerup', 'pointerleave', 'pointercancel']) b.addEventListener(ev, stopNudge);
+    }
+
+    maskBar.addEventListener('pointerdown', (e) => e.stopPropagation());
+    maskBar.addEventListener('click', async (e) => {
+      e.stopPropagation(); // kein Menü
+      const chip = e.target.closest('[data-screen]');
+      if (chip) return send({ type: 'mask', op: 'edit', screenId: chip.dataset.screen });
+      const k = e.target.closest('[data-k]')?.dataset.k;
+      if (k === 'add') {
+        const shape = e.target.closest('[data-shape]').dataset.shape;
+        mk.sel = null;
+        mk.scale = false;
+        if (shape === 'poly') {
+          mk.tool = null;
+          mk.drawing = { id: Math.random().toString(36).slice(2, 10), shape: 'poly', pts: [] };
+          mk.masks.push(mk.drawing);
+        } else mk.tool = mk.tool === shape ? null : shape; // nochmal antippen = abwählen
+        changedMask();
+      } else if (k === 'scale') {
+        mk.scale = !mk.scale;
+        mk.tool = null;
+        if (mk.sel) mk.sel.v = -1; // skaliert wird immer der ganze Bereich
+        changedMask();
+      } else if (k === 'close' && mk.drawing) finishDrawing();
+      else if (k === 'undo') {
+        if (mk.drawing) {
+          mk.drawing.pts.splice(-2, 2);
+          if (!mk.drawing.pts.length) {
+            mk.masks = mk.masks.filter((m) => m !== mk.drawing);
+            mk.drawing = null;
+          }
+        } else if (mk.sel?.v >= 0 && mk.masks[mk.sel.p]?.shape !== 'ellipse' && mk.masks[mk.sel.p]?.pts.length > 6) {
+          mk.masks[mk.sel.p].pts.splice(mk.sel.v * 2, 2); // gewählten Punkt löschen (mindestens 3 bleiben)
+          mk.sel.v = -1;
+        }
+        changedMask();
+      } else if (k === 'del' && mk.sel) {
+        mk.masks.splice(mk.sel.p, 1);
+        mk.sel = null;
+        changedMask();
+      } else if (k === 'clear' && mk.masks.length) {
+        if (!(await askScreen(t('Alle {0} Bereiche der Maske löschen?', mk.masks.length), t('Der Screen zeigt danach wieder die ganze Fläche.')))) return;
+        mk.masks = [];
+        mk.sel = null;
+        mk.drawing = null;
+        changedMask();
+      }
+    });
+    maskBar.querySelector('[data-k=on]').addEventListener('change', (e) => send({ type: 'mask', op: 'enable', on: e.target.checked }));
+    // Weiche Kanten: live (höchstens einmal pro Bild an den Server)
+    let softFrame = 0;
+    const softInput = maskBar.querySelector('[data-k=soft]');
+    softInput.addEventListener('input', () => {
+      mk.feather = Number(softInput.value);
+      maskBar.querySelector('.mk-softval').textContent = mk.feather;
+      renderMaskEditor();
+      softFrame ||= requestAnimationFrame(() => {
+        softFrame = 0;
+        send({ type: 'mask', op: 'feather', value: mk.feather });
+      });
+    });
+    softInput.addEventListener('pointerdown', () => (mk.softDragging = true));
+    addEventListener('pointerup', () => (mk.softDragging = false));
+    maskBar.querySelector('[data-k=inv]').addEventListener('change', (e) => {
+      mk.invert = e.target.checked;
+      renderMaskEditor();
+      send({ type: 'mask', op: 'invert', on: e.target.checked });
+    });
+
+    remoteBar.addEventListener('click', (e) => {
+      e.stopPropagation(); // kein Menü
+      const action = e.target.closest('button')?.dataset.r;
+      if (action === 'mask') return setMaskBar(maskBar.hidden);
+      if (['pen', 'sound', 'list'].includes(action)) setMaskBar(false);
+      if (action === 'pen') {
+        setSoundBar(false);
+        setListBar(false);
+        setPen(!penOn);
+      }
+      if (action === 'sound') {
+        setListBar(false);
+        setSoundBar(soundBar.hidden);
+      }
+      if (action === 'list') setListBar(listBar.hidden);
+      if (action === 'upload') upInput.click(); // öffnet am Smartphone die Galerie bzw. Kamera
+      if (action === 'rotate' && rotatable()) {
+        setRotation(rot + 1);
+        send({ type: 'remoteRotate', itemId: currentItem?.id, r: rot });
+      }
+      if (action === 'next' || action === 'prev') remoteStep(action);
+      if (action === 'unzoom') resetZoom(true);
+      if (action === 'stop') send({ type: 'remote', action: 'stop' });
+    });
+    document.addEventListener('keydown', (e) => {
+      if (remote?.role !== 'controller' || e.target.closest?.('input, select')) return;
+      if (e.key === 'ArrowRight' || e.key === 'PageDown' || e.key === ' ') remoteStep('next');
+      if (e.key === 'ArrowLeft' || e.key === 'PageUp') remoteStep('prev');
+      if (e.key.toLowerCase() === 'z' && (e.ctrlKey || e.metaKey)) undoStroke();
+    });
+
+    // Tippen/Klicken: Menü ein/aus, Ton freischalten, blockiertes Video starten.
+    // Mit Zoom wartet ein einzelnes Antippen kurz, ob ein zweites folgt (Doppeltippen = Zoom).
+    let tapTimer = null;
+    function tapAction() {
+      if (!menuEnabled) {
+        if (!isFullscreen()) toggleFullscreen();
+        return;
+      }
+      menu.hidden ? showMenu() : hideMenu();
+    }
+    document.addEventListener('click', (e) => {
+      hint.style.opacity = 0;
+      restartVisibleVideo();
+      if (musicState?.enabled && musicState.playing && musicPlayer.paused) applyMusic();
+      if (gestureMoved) return (gestureMoved = false); // Ende einer Zoom-/Verschiebe-Geste
+      if (penOn) return; // Stift: Antippen setzt einen Punkt, kein Menü
+      if (!zoomable()) return tapAction();
+      if (tapTimer) {
+        clearTimeout(tapTimer);
+        tapTimer = null;
+        return toggleZoomAt(e.clientX, e.clientY);
+      }
+      tapTimer = setTimeout(() => {
+        tapTimer = null;
+        tapAction();
+      }, 280);
+    });
+
+    function setMenuEnabled(on) {
+      menuEnabled = on !== false;
+      hint.textContent = menuEnabled ? 'Tippen für Menü' : 'Tippen für Vollbild';
+      if (!menuEnabled) hideMenu();
+    }
 
     // Bildschirm wach halten (nur in sicheren Kontexten verfügbar, z. B. https oder localhost)
     async function keepAwake() {
