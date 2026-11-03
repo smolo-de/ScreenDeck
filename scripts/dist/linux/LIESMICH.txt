@@ -1,0 +1,26 @@
+ScreenDeck {{VERSION}} für Linux ({{TARGET}}) – ohne Node.js-Installation
+=========================================================================
+
+AUSPACKEN
+  tar -xzf ScreenDeck-{{TARGET}}.tar.gz
+  cd ScreenDeck-{{TARGET}}
+
+EINFACH STARTEN (Daten im Ordner data/ daneben, Beenden mit Strg+C)
+  ./start.sh
+  Verwaltung: http://localhost:3000/admin – Port 80 nur mit sudo bzw. als Dienst.
+
+ALS DIENST (Start beim Hochfahren, Port 80, eigener Benutzer)
+  sudo sh install.sh
+  Programm: /opt/screendeck   Daten: /var/lib/screendeck
+  Status: systemctl status screendeck   Protokoll: journalctl -u screendeck -f
+  Update: neues Archiv auspacken und erneut „sudo sh install.sh“ (Daten bleiben).
+  Entfernen: sudo sh /opt/screendeck/uninstall.sh
+
+HINWEISE
+  - Medienordner: Pfade des Rechners (z. B. /mnt/fotos) unter ⚙ Einstellungen →
+    Medienquellen einbinden. Der Dienst-Benutzer „screendeck“ braucht Leserechte.
+    Netzwerkfreigaben (SMB/NFS) im System einbinden (mount) – die Anmeldung in der
+    Verwaltung gibt es nur unter Windows.
+  - Firewall (falls aktiv), z. B. ufw:  sudo ufw allow 80/tcp && sudo ufw allow 3000/tcp
+  - screendeck.local funktioniert ohne weitere Einrichtung, sofern kein anderer
+    mDNS-Dienst (Avahi) den Namen belegt.

@@ -77,6 +77,10 @@ const state = loadState();
 const validPort = (v) => (Number.isInteger(Number(v)) && Number(v) >= 0 && Number(v) <= 65535 ? Number(v) : null);
 const PORT = validPort(process.env.PORT) || validPort(state.settings.port) || 3000;
 const EXTRA_FROM_ENV = process.env.EXTRA_PORT !== undefined;
+// Läuft der Server hinter einer Portweiterleitung (z. B. Docker), sieht er nur seine interne Adresse.
+// PUBLIC_HOST (IP oder Name des Rechners) und PUBLIC_PORT legen dann fest, was Verwaltung und QR-Codes anzeigen.
+const PUBLIC_HOST = process.env.PUBLIC_HOST?.trim() || null;
+const PUBLIC_PORT = validPort(process.env.PUBLIC_PORT) || null;
 const extraPortSetting = () => (EXTRA_FROM_ENV ? validPort(process.env.EXTRA_PORT) ?? 0 : validPort(state.settings.extraPort) ?? 80);
 
 let saveTimer = null;
@@ -1347,6 +1351,7 @@ const hostName = () => toHostName(state.settings.hostName);
 
 /** IPv4-Adresse(n), unter denen der Absender den Server erreicht (gleiches Teilnetz bevorzugt) */
 function addressesFor(remote) {
+  if (PUBLIC_HOST) return [PUBLIC_HOST];
   const own = Object.values(os.networkInterfaces()).flat().filter((a) => a && a.family === 'IPv4' && !a.internal);
   const num = (ip) => ip.split('.').reduce((n, p) => n * 256 + Number(p), 0);
   const same = own.filter((a) => remote && (num(a.address) & num(a.netmask)) === (num(remote) & num(a.netmask)));
@@ -1417,10 +1422,12 @@ app.post('/api/pair-key', (req, res) => {
 });
 
 app.get('/api/info', (req, res) => {
-  const addresses = Object.values(os.networkInterfaces())
-    .flat()
-    .filter((a) => a && a.family === 'IPv4' && !a.internal)
-    .map((a) => a.address);
+  const addresses = PUBLIC_HOST
+    ? [PUBLIC_HOST]
+    : Object.values(os.networkInterfaces())
+        .flat()
+        .filter((a) => a && a.family === 'IPv4' && !a.internal)
+        .map((a) => a.address);
   res.json({
     port: PORT,
     shortPort,
@@ -2927,7 +2934,7 @@ async function listenExtra() {
     });
     if (extraStatus.ok) extraServer = extra;
   }
-  shortPort = extraStatus?.ok ? port : PORT;
+  shortPort = PUBLIC_PORT ?? (extraStatus?.ok ? port : PORT);
   return extraStatus;
 }
 
@@ -2941,9 +2948,7 @@ server.listen(PORT, async () => {
   const line = (label, url) => console.log(`  ${(label + ':').padEnd(13)}${url}`);
   line(de ? 'Verwaltung' : 'Admin', `http://localhost:${PORT}/admin`);
   if (hostName()) line(de ? 'Im Netzwerk' : 'Network', withPort(hostName() + '.local', shortPort));
-  for (const a of Object.values(os.networkInterfaces()).flat()) {
-    if (a && a.family === 'IPv4' && !a.internal) line('Screens', withPort(a.address, shortPort));
-  }
+  for (const ip of addressesFor(null)) line('Screens', withPort(ip, shortPort));
   if (extra?.error) {
     const why = extra.error === 'EADDRINUSE' ? (de ? 'schon belegt' : 'already in use') : de ? 'keine Berechtigung' : 'no permission';
     console.log(de ? `  (Port ${EXTRA_PORT} ${why} – Adressen daher mit :${PORT})` : `  (port ${EXTRA_PORT} ${why} – addresses therefore use :${PORT})`);

@@ -25,6 +25,39 @@ Tip: Many routers (e.g. Fritz!Box) also make devices reachable by their name the
 Change the port: `PORT=8080 npm start` (PowerShell: `$env:PORT=8080; npm start`)
 Change the data directory: `DATA_DIR=...` (default: `./data`)
 
+## Deployment
+
+Besides running it with Node.js (above) there are three ready-made ways. `npm run dist` builds the Windows and Linux packages into `dist/`; single targets e.g. with `npm run dist -- win-x64`. The build uses the Node version of the machine; for Linux the script downloads the matching Node from nodejs.org (checksum verified).
+
+**Windows – no installation** (`ScreenDeck-win-x64.zip`)
+- Unzip and double-click `ScreenDeck.exe`: a window shows the addresses and the admin opens in the browser. Closing the window stops it.
+- Data lives in the `data` folder next to the exe. To update, replace `ScreenDeck.exe` and `app`, keep `data`.
+- **Autostart:** `Autostart einrichten.cmd` starts ScreenDeck in the background on every boot (scheduled task under the system account, no time limit, restart after a crash) and allows it in the firewall. `Autostart entfernen.cmd` undoes that.
+- The exe is Node.js with a built-in starter (Node “single executable application”). The `app` folder next to it holds the server and its dependencies, because image processing (sharp) needs native libraries. The exe is not signed; SmartScreen may warn on first start.
+
+**Linux – x64 and arm64, e.g. Raspberry Pi** (`ScreenDeck-linux-x64.tar.gz`, `…-linux-arm64.tar.gz`)
+- `tar -xzf ScreenDeck-linux-x64.tar.gz && cd ScreenDeck-linux-x64`, then `./start.sh` (data in `data/` next to it, port 3000).
+- **As a service:** `sudo sh install.sh` sets up a systemd service: program in `/opt/screendeck`, data in `/var/lib/screendeck`, own user `screendeck`, port 80 without root. Update: unpack the new archive and run `sudo sh install.sh` again. Remove: `sudo sh /opt/screendeck/uninstall.sh` (data is kept).
+- No Node.js needed. Mount network shares in the system; the sign-in in the admin is Windows-only.
+
+**Docker** (`Dockerfile`, `docker-compose.yml`)
+- `docker compose up -d` – data in the `screendeck-data` volume, reachable on ports 3000 and 80.
+- Inside the container ScreenDeck only sees its internal address. For correct QR codes and addresses, set `PUBLIC_HOST` in `docker-compose.yml` to the machine's IP (and `PUBLIC_PORT` to match the port mapping). On Linux, `network_mode: host` is an alternative – then `screendeck.local` works too.
+- Mount media folders of the machine as volumes (example in the file) and enter the path inside the container in the admin.
+
+| | Windows exe | Linux package | Docker |
+|---|---|---|---|
+| Installation needed | no | no (service optional) | Docker |
+| Start on boot | `Autostart einrichten.cmd` | `install.sh` | `restart: unless-stopped` |
+| Network shares with sign-in | yes | mount in the system | mount as volume |
+| `screendeck.local` | yes | yes | host network only |
+
+**Automatic builds (GitHub Actions)**
+- Every push and pull request runs `.github/workflows/ci.yml`: syntax check, smoke test on Linux and Windows (`npm test` starts the server with an empty data folder and checks pages, API, upload and thumbnail) and a Docker build that is started and checked as well.
+- A release is built by pushing a version tag: `git tag v1.2.0 && git push origin v1.2.0`. `.github/workflows/release.yml` then runs the tests, builds all three packages, unpacks each one and starts the program in it (linux-arm64 emulated via QEMU), publishes the Docker image for amd64 and arm64 to `ghcr.io/<owner>/screendeck` and creates a GitHub release with the archives and `SHA256SUMS.txt`. The version is taken from the tag. Tags with a hyphen (`v1.2.0-beta.1`) become pre-releases.
+- Started by hand (Actions → Release → Run workflow) everything is built and tested without publishing.
+- **Security checks** are part of `ci.yml` and also run every Monday: `npm audit`, Gitleaks (passwords and tokens in the Git history) and Trivy (Docker image). High or critical findings fail the run, for the image only if a fix exists; a failed check also stops a release. Actions are pinned to commit hashes and the scanners to a version with a stored checksum. Dependabot (`.github/dependabot.yml`) proposes updates weekly for npm, Actions and the Docker base image; scanner versions in `ci.yml` are updated by hand.
+
 ## Language
 
 The interface is available in **English** and **German**. The default is the browser language.

@@ -25,6 +25,39 @@ Tipp: Viele Router (z. B. Fritz!Box) machen Geräte auch selbst unter ihrem Name
 Port ändern: `PORT=8080 npm start` (PowerShell: `$env:PORT=8080; npm start`)
 Datenverzeichnis ändern: `DATA_DIR=...` (Standard: `./data`)
 
+## Bereitstellung
+
+Neben dem Start mit Node.js (oben) gibt es drei fertige Wege. `npm run dist` baut die Pakete für Windows und Linux nach `dist/`, einzelne Ziele z. B. mit `npm run dist -- win-x64`. Gebaut wird mit der Node-Version des Rechners; für Linux lädt das Skript das passende Node von nodejs.org (mit Prüfsumme).
+
+**Windows – ohne Installation** (`ScreenDeck-win-x64.zip`)
+- Entpacken und `ScreenDeck.exe` doppelklicken: Ein Fenster zeigt die Adressen, die Verwaltung öffnet sich im Browser. Fenster schließen = beenden.
+- Daten liegen im Ordner `data` neben der Exe. Für ein Update `ScreenDeck.exe` und `app` ersetzen, `data` behalten.
+- **Autostart:** `Autostart einrichten.cmd` startet ScreenDeck bei jedem Hochfahren im Hintergrund (geplante Aufgabe unter dem Systemkonto, ohne Zeitlimit, Neustart nach Absturz) und gibt es in der Firewall frei. `Autostart entfernen.cmd` macht das rückgängig.
+- Die Exe ist Node.js mit eingebautem Starter (Node „Single Executable Application“). Der Ordner `app` daneben enthält Server und Abhängigkeiten, weil die Bildverarbeitung (sharp) native Bibliotheken braucht. Die Exe ist nicht signiert, SmartScreen kann beim ersten Start warnen.
+
+**Linux – x64 und arm64, z. B. Raspberry Pi** (`ScreenDeck-linux-x64.tar.gz`, `…-linux-arm64.tar.gz`)
+- `tar -xzf ScreenDeck-linux-x64.tar.gz && cd ScreenDeck-linux-x64`, dann `./start.sh` (Daten in `data/` daneben, Port 3000).
+- **Als Dienst:** `sudo sh install.sh` richtet einen systemd-Dienst ein: Programm in `/opt/screendeck`, Daten in `/var/lib/screendeck`, eigener Benutzer `screendeck`, Port 80 ohne root. Update: neues Archiv auspacken und erneut `sudo sh install.sh`. Entfernen: `sudo sh /opt/screendeck/uninstall.sh` (Daten bleiben).
+- Kein Node.js nötig. Netzwerkfreigaben im System einbinden (mount); die Anmeldung in der Verwaltung gibt es nur unter Windows.
+
+**Docker** (`Dockerfile`, `docker-compose.yml`)
+- `docker compose up -d` – Daten im Volume `screendeck-data`, erreichbar auf Port 3000 und 80.
+- Im Container sieht ScreenDeck nur seine interne Adresse. Damit QR-Codes und angezeigte Adressen stimmen, in `docker-compose.yml` `PUBLIC_HOST` auf die IP des Rechners setzen (und `PUBLIC_PORT` passend zur Portweiterleitung). Unter Linux geht alternativ `network_mode: host` – dann funktioniert auch `screendeck.local`.
+- Medienordner des Rechners als Volume einbinden (Beispiel in der Datei) und in der Verwaltung den Pfad im Container angeben.
+
+| | Windows-Exe | Linux-Paket | Docker |
+|---|---|---|---|
+| Installation nötig | nein | nein (Dienst optional) | Docker |
+| Start beim Hochfahren | `Autostart einrichten.cmd` | `install.sh` | `restart: unless-stopped` |
+| Netzwerkfreigaben mit Anmeldung | ja | im System einbinden | als Volume einbinden |
+| `screendeck.local` | ja | ja | nur mit Host-Netzwerk |
+
+**Automatische Builds (GitHub Actions)**
+- Jeder Push und Pull Request startet `.github/workflows/ci.yml`: Syntaxprüfung, Rauchtest unter Linux und Windows (`npm test` startet den Server mit leerem Datenordner und prüft Seiten, API, Upload und Vorschaubild) und ein Docker-Build, der ebenfalls gestartet und geprüft wird.
+- Ein Release entsteht durch einen Versions-Tag: `git tag v1.2.0 && git push origin v1.2.0`. `.github/workflows/release.yml` führt dann die Tests aus, baut alle drei Pakete, packt jedes aus und startet das Programm darin (linux-arm64 per QEMU emuliert), veröffentlicht das Docker-Image für amd64 und arm64 unter `ghcr.io/<besitzer>/screendeck` und legt ein GitHub-Release mit den Archiven und `SHA256SUMS.txt` an. Die Version kommt aus dem Tag. Tags mit Bindestrich (`v1.2.0-beta.1`) werden Vorabversionen.
+- Von Hand gestartet (Actions → Release → Run workflow) wird alles gebaut und getestet, aber nichts veröffentlicht.
+- **Sicherheitsprüfungen** gehören zu `ci.yml` und laufen zusätzlich jeden Montag: `npm audit`, Gitleaks (Passwörter und Tokens im Git-Verlauf) und Trivy (Docker-Image). Hohe oder kritische Funde lassen den Lauf scheitern, beim Image nur, wenn es eine Korrektur gibt; das stoppt auch ein Release. Actions sind auf Commit-Hashes festgelegt, die Scanner auf eine Version mit hinterlegter Prüfsumme. Dependabot (`.github/dependabot.yml`) schlägt wöchentlich Updates für npm, Actions und das Docker-Basisimage vor; die Scanner-Versionen in `ci.yml` werden von Hand aktualisiert.
+
 ## Sprache
 
 Die Oberfläche gibt es auf **Deutsch** und **Englisch**. Standard ist die Sprache des Browsers.

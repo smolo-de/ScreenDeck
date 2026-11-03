@@ -1,0 +1,31 @@
+ScreenDeck {{VERSION}} für Windows ({{TARGET}}) – ohne Installation
+=====================================================================
+
+STARTEN
+  ScreenDeck.exe doppelklicken. Es öffnet sich ein Fenster mit den Adressen und
+  die Verwaltung im Browser. Fenster schließen = ScreenDeck beenden.
+
+  Verwaltung:  http://localhost/admin   (falls Port 80 belegt ist: http://localhost:3000/admin)
+  Screens:     http://<IP-dieses-Rechners>/   – oder in der Verwaltung „▦ QR-Code“
+
+  Beim ersten Start fragt die Windows-Firewall nach – „Private Netzwerke“ erlauben,
+  damit Tablets, Fernseher und Smartphones den Server erreichen.
+
+AUTOMATISCH BEIM HOCHFAHREN (im Hintergrund, ohne Fenster)
+  „Autostart einrichten.cmd“ doppelklicken (fragt nach Administratorrechten).
+  Das richtet auch die Firewall-Freigabe ein. Rückgängig: „Autostart entfernen.cmd“.
+
+  Im Hintergrund läuft ScreenDeck unter dem Systemkonto. Kennwörter für Netzwerk-
+  freigaben (Medienquellen) dann einmal neu eingeben; verbundene Laufwerksbuchstaben
+  (Z:) sind dort nicht sichtbar – Netzwerkpfade (\\Server\Freigabe) verwenden.
+
+DATEN
+  Liegen im Ordner „data“ neben ScreenDeck.exe (Einstellungen, Playlisten, Uploads).
+  Für ein Update den Ordner „app“ und ScreenDeck.exe ersetzen – „data“ behalten.
+
+ORDNER VERSCHIEBEN
+  Den ganzen Ordner verschieben, „app“ muss neben ScreenDeck.exe liegen.
+  Bei eingerichtetem Autostart danach „Autostart einrichten.cmd“ erneut ausführen.
+
+Hinweis: ScreenDeck.exe ist nicht digital signiert. Windows SmartScreen kann beim
+ersten Start warnen – „Weitere Informationen“ → „Trotzdem ausführen“.
