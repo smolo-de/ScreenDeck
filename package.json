@@ -6,7 +6,9 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "node --watch server.js"
+    "dev": "node --watch server.js",
+    "dist": "node scripts/build.mjs",
+    "test": "node scripts/smoke-test.mjs"
   },
   "engines": {
     "node": ">=20"
@@ -16,7 +18,10 @@
     "multer": "^2.0.2",
     "multicast-dns": "^7.2.5",
     "qrcode": "^1.5.4",
-    "sharp": "^0.34.5",
+    "sharp": "^0.35.5",
     "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "postject": "^1.0.0-alpha.6"
   }
 }
