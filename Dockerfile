@@ -12,6 +12,10 @@ ENV NODE_ENV=production \
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --no-audit --no-fund && npm cache clean --force
 
+# npm wird zur Laufzeit nicht gebraucht – weniger Angriffsfläche, seine Abhängigkeiten fallen beim Scan nicht mehr an
+RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack \
+    /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack
+
 COPY server.js LICENSE ./
 COPY public ./public
 
