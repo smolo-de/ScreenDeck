@@ -1,0 +1,33 @@
+<?xml version="1.0"?>
+<!-- ScreenDeck für Unraid. Das Image vorher bauen (docker build -t screendeck .) oder unter <Repository>
+     das eigene Registry-Image eintragen. PUBLIC_HOST auf die IP von Unraid setzen, sonst zeigen
+     Verwaltung und QR-Codes die interne Adresse des Containers. -->
+<Container version="2">
+  <Name>screendeck</Name>
+  <Repository>screendeck:latest</Repository>
+  <Registry/>
+  <Network>bridge</Network>
+  <MyIP/>
+  <Shell>sh</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/smolo-de/ScreenDeck/issues</Support>
+  <Project>https://github.com/smolo-de/ScreenDeck</Project>
+  <Overview>ScreenDeck - Bildschirme im Netz mit Playlisten, Bildern und Videos bespielen. Verwaltung unter /admin. Daten (Playlisten, Uploads, Einstellungen) liegen in /data.</Overview>
+  <Category>MediaApp:Photos Productivity: Tools:</Category>
+  <WebUI>http://[IP]:[PORT:3000]/admin</WebUI>
+  <TemplateURL/>
+  <Icon>https://raw.githubusercontent.com/smolo-de/ScreenDeck/main/unraid/icon.png</Icon>
+  <ExtraParams>--user 99:100 --memory=1g</ExtraParams>
+  <PostArgs/>
+  <CPUset/>
+  <DonateText/>
+  <DonateLink/>
+  <Requires/>
+  <Config Name="Web-Oberfläche" Target="3000" Default="8092" Mode="tcp" Description="Port für Verwaltung (/admin) und Screens (/). Unraid belegt Port 80 selbst, darum ohne zusätzlichen Port 80." Type="Port" Display="always" Required="true" Mask="false">8092</Config>
+  <Config Name="Daten" Target="/data" Default="/mnt/user/appdata/screendeck" Mode="rw" Description="Playlisten, Uploads, Vorschaubilder und Einstellungen. Sichern: den Ordner kopieren." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/screendeck</Config>
+  <Config Name="Medienordner" Target="/media/fotos" Default="" Mode="ro" Description="Optional: Ordner mit Bildern/Videos (z. B. /mnt/user/Fotos). In der Verwaltung dann als /media/fotos hinzufügen." Type="Path" Display="always" Required="false" Mask="false"></Config>
+  <Config Name="Adresse von Unraid" Target="PUBLIC_HOST" Default="" Mode="" Description="IP oder Name von Unraid, z. B. tower.local – damit Adressen und QR-Codes stimmen" Type="Variable" Display="always" Required="true" Mask="false"></Config>
+  <Config Name="Port von außen" Target="PUBLIC_PORT" Default="8092" Mode="" Description="Gleicher Wert wie „Web-Oberfläche“" Type="Variable" Display="advanced" Required="false" Mask="false">8092</Config>
+  <Config Name="Zusätzlicher Port" Target="EXTRA_PORT" Default="0" Mode="" Description="0 = aus (im Container nicht nötig)" Type="Variable" Display="advanced" Required="false" Mask="false">0</Config>
+  <Config Name="Zeitzone" Target="TZ" Default="Europe/Berlin" Mode="" Description="Zeitzone des Containers" Type="Variable" Display="advanced" Required="false" Mask="false">Europe/Berlin</Config>
+</Container>

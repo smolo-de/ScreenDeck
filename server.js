@@ -2870,9 +2870,19 @@ function sendVersion(ws) {
   } catch {}
 }
 
+// Dateien beobachten, ohne dass der Server daran scheitert: Ist das Limit für Datei-Beobachter des Systems
+// erschöpft (ENOSPC, häufig in Containern und auf NAS-Systemen), fehlt nur das sofortige Melden von Änderungen.
+function watchSafe(target, onChange) {
+  try {
+    fs.watch(target, onChange).on('error', (e) => console.warn(`Beobachten von ${target} beendet: ${e.message}`));
+  } catch (e) {
+    console.warn(`Änderungen an ${target} werden nicht sofort gemeldet (${e.code || e.message}).`);
+  }
+}
+
 // Geänderte Dateien in public/ (z. B. nach einem Update) sofort an alle melden
 let versionTimer = null;
-fs.watch(path.join(__dirname, 'public'), () => {
+watchSafe(path.join(__dirname, 'public'), () => {
   clearTimeout(versionTimer);
   versionTimer = setTimeout(() => wss.clients.forEach(sendVersion), 1000);
 });
@@ -2888,7 +2898,7 @@ function serverOutdated() {
   }
 }
 let serverWatchTimer = null;
-fs.watch(SERVER_FILE, () => {
+watchSafe(SERVER_FILE, () => {
   clearTimeout(serverWatchTimer);
   serverWatchTimer = setTimeout(() => serverOutdated() && changed(), 1000);
 });

@@ -43,6 +43,7 @@ Neben dem Start mit Node.js (oben) gibt es drei fertige Wege. `npm run dist` bau
 **Docker** (`Dockerfile`, `docker-compose.yml`)
 - `docker compose up -d` – Daten im Volume `screendeck-data`, erreichbar auf Port 3000 und 80.
 - Im Container sieht ScreenDeck nur seine interne Adresse. Damit QR-Codes und angezeigte Adressen stimmen, in `docker-compose.yml` `PUBLIC_HOST` auf die IP des Rechners setzen (und `PUBLIC_PORT` passend zur Portweiterleitung). Unter Linux geht alternativ `network_mode: host` – dann funktioniert auch `screendeck.local`.
+- **Unraid:** Template und Installationsskript liegen in [`unraid/`](unraid/README.md).
 - Medienordner des Rechners als Volume einbinden (Beispiel in der Datei) und in der Verwaltung den Pfad im Container angeben.
 
 | | Windows-Exe | Linux-Paket | Docker |
