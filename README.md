@@ -44,6 +44,7 @@ Besides running it with Node.js (above) there are three ready-made ways. `npm ru
 - `docker compose up -d` – data in the `screendeck-data` volume, reachable on ports 3000 and 80.
 - Inside the container ScreenDeck only sees its internal address. For correct QR codes and addresses, set `PUBLIC_HOST` in `docker-compose.yml` to the machine's IP (and `PUBLIC_PORT` to match the port mapping). On Linux, `network_mode: host` is an alternative – then `screendeck.local` works too.
 - Mount media folders of the machine as volumes (example in the file) and enter the path inside the container in the admin.
+- **Unraid:** template and install script in [`unraid/`](unraid/README.md) (German).
 
 | | Windows exe | Linux package | Docker |
 |---|---|---|---|
