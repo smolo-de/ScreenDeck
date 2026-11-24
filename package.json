@@ -19,7 +19,7 @@
     "multicast-dns": "^7.2.5",
     "qrcode": "^1.5.4",
     "sharp": "^0.35.5",
-    "ws": "^8.18.3"
+    "ws": "^8.23.0"
   },
   "devDependencies": {
     "postject": "^1.0.0-alpha.6"
